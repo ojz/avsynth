@@ -32,8 +32,8 @@ Window *window_create(const char *title, int x, int y, int w, int h)
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 
     win->sdl = SDL_CreateWindow(title,
-                                x < 0 ? SDL_WINDOWPOS_CENTERED : x,
-                                y < 0 ? SDL_WINDOWPOS_CENTERED : y,
+                                x < 0 ? (int)SDL_WINDOWPOS_CENTERED : x,
+                                y < 0 ? (int)SDL_WINDOWPOS_CENTERED : y,
                                 w, h,
                                 SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win->sdl) {

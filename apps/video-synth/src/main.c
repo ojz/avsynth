@@ -1,56 +1,70 @@
 /*
  * vsynth — video feedback synthesizer. See PRD.md.
  *
- * M0: borderless window that keeps drawing while moved/resized.
- *     A moving test pattern stands in for the capture graph until M1.
+ * M1: screen region -> libavfilter graph -> borderless window that keeps
+ *     drawing while moved/resized.
+ *
+ *   vsynth [--region X,Y,W,H] [--fps N] [--vf "filterchain"] [--win X,Y,W,H]
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <math.h>
+#include <string.h>
 #include <SDL2/SDL.h>
+#include <libavutil/frame.h>
 
 #include "window.h"
+#include "voice.h"
 
-#define TEST_W 320
-#define TEST_H 240
+static const char *DEFAULT_VF =
+    "scale=iw*1.02:ih*1.02,crop=iw/1.02:ih/1.02,"
+    "rotate@rot=0.8*PI/180:c=black:ow=iw:oh=ih,"
+    "hue@hue=h=t*25:s=1.15";
 
-static void fill_test_pattern(uint8_t *bgra, int w, int h, double t)
+static int parse_rect(const char *s, int *x, int *y, int *w, int *h)
 {
-    for (int y = 0; y < h; y++) {
-        uint8_t *row = bgra + (size_t)y * w * 4;
-        for (int x = 0; x < w; x++) {
-            double u = (double)x / w, v = (double)y / h;
-            double r = 0.5 + 0.5 * sin(6.28 * (u + t * 0.3));
-            double g = 0.5 + 0.5 * sin(6.28 * (v - t * 0.2));
-            double b = 0.5 + 0.5 * sin(6.28 * (u + v + t * 0.5));
-            row[x * 4 + 0] = (uint8_t)(b * 255);
-            row[x * 4 + 1] = (uint8_t)(g * 255);
-            row[x * 4 + 2] = (uint8_t)(r * 255);
-            row[x * 4 + 3] = 255;
-        }
-    }
+    return sscanf(s, "%d,%d,%d,%d", x, y, w, h) == 4 ? 0 : -1;
 }
 
 int main(int argc, char **argv)
 {
-    (void)argc; (void)argv;
+    VoiceConfig cfg = { .cap_x = 0, .cap_y = 0, .cap_w = 800, .cap_h = 600,
+                        .cap_fps = 30, .filters = DEFAULT_VF };
+    int win_x = -1, win_y = -1, win_w = 800, win_h = 600;
+
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--region") && i + 1 < argc) {
+            if (parse_rect(argv[++i], &cfg.cap_x, &cfg.cap_y, &cfg.cap_w, &cfg.cap_h)) goto usage;
+        } else if (!strcmp(argv[i], "--win") && i + 1 < argc) {
+            if (parse_rect(argv[++i], &win_x, &win_y, &win_w, &win_h)) goto usage;
+        } else if (!strcmp(argv[i], "--fps") && i + 1 < argc) {
+            cfg.cap_fps = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--vf") && i + 1 < argc) {
+            cfg.filters = argv[++i];
+        } else {
+        usage:
+            fprintf(stderr, "usage: %s [--region X,Y,W,H] [--win X,Y,W,H] [--fps N] [--vf CHAIN]\n", argv[0]);
+            return 2;
+        }
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
 
-    Window *win = window_create("vsynth", -1, -1, 640, 480);
+    Window *win = window_create("vsynth", win_x, win_y, win_w, win_h);
     if (!win) return 1;
 
-    uint8_t *frame = malloc((size_t)TEST_W * TEST_H * 4);
-    if (!frame) return 1;
+    Voice *voice = voice_start(&cfg);
+    if (!voice) return 1;
 
-    fprintf(stderr, "vsynth M0: left-drag moves, alt+right-drag resizes, f fullscreen, q/esc quits\n");
+    fprintf(stderr, "vsynth M1: capture %d,%d %dx%d @%dfps\n"
+                    "  left-drag moves, alt+right-drag resizes, f fullscreen, q/esc quits\n",
+            cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h, cfg.cap_fps);
 
     int running = 1;
-    Uint64 t0 = SDL_GetPerformanceCounter();
+    int frames = 0;
+    Uint32 fps_t0 = SDL_GetTicks();
     while (running) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -78,16 +92,33 @@ int main(int argc, char **argv)
             }
         }
 
-        double t = (double)(SDL_GetPerformanceCounter() - t0) / SDL_GetPerformanceFrequency();
-        fill_test_pattern(frame, TEST_W, TEST_H, t);
-        window_present_frame(win, frame, TEST_W, TEST_H, TEST_W * 4);
+        if (voice_failed(voice)) {
+            fprintf(stderr, "voice thread failed; exiting\n");
+            running = 0;
+        }
+
+        AVFrame *f = voice_take_frame(voice);
+        if (f) {
+            window_present_frame(win, f->data[0], f->width, f->height, f->linesize[0]);
+            av_frame_free(&f);
+            frames++;
+            Uint32 now = SDL_GetTicks();
+            if (now - fps_t0 >= 2000) {
+                fprintf(stderr, "fps: %.1f\n", frames * 1000.0 / (now - fps_t0));
+                frames = 0;
+                fps_t0 = now;
+            }
+        } else {
+            window_present(win);   /* vsync paces this; keeps window painted during drags */
+            SDL_Delay(1);
+        }
     }
 
     int x, y, w, h;
     window_get_geometry(win, &x, &y, &w, &h);
     fprintf(stderr, "window geometry at exit: %d,%d %dx%d\n", x, y, w, h);
 
-    free(frame);
+    voice_stop(voice);
     window_destroy(win);
     SDL_Quit();
     return 0;

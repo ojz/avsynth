@@ -18,6 +18,7 @@ pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 add_executable(vsynth
   src/main.c
   src/window.c
+  src/voice.c
 )
 
 target_include_directories(vsynth PRIVATE src)

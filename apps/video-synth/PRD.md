@@ -42,11 +42,33 @@ ask it to.
 
 - Morph: interpolate all knobs from patch A to patch B over N seconds.
 - Modulators: LFOs and envelopes on any knob, computed in the host.
-- MIDI and OSC input mapped to knobs.
+- **MIDI with MIDI learn.** Select a knob, twist a controller, it is bound.
+  Bindings are stored per project in SQLite (`midi_map` table: device,
+  channel, CC or note, knob, curve). Also bind patch slots to notes or pads,
+  and bypass toggles to buttons. Library: RtMidi (C API, cross-platform,
+  Windows MM and ALSA/JACK) or PortMidi. Every knob already has min, max and
+  a curve, so a 0..127 CC maps without extra data.
+- OSC input on the same binding model, so phones and tablets can be controllers.
+- **Multiple outputs.** A voice's output can go to any display: a projector as
+  a second SDL window on another monitor, fullscreen, while the control
+  surface and the feedback loop stay on the laptop screen. SDL2 gives us
+  displays as a list with geometry; a window is created on a chosen display.
+  Cross-feeding a projector output back through a camera source is the
+  physical loop, digitally patched.
 - Multiple voices: several graphs running at once, mixed or cross-fed.
 - Recording to file (libavcodec is already linked).
 - GPU filters via libplacebo / OpenCL / Vulkan filters when CPU limits bite.
 - Other sources: camera, video file, `testsrc`, another voice's output.
+
+**On the UI toolkit question (Qt or not).** The video path, the rack, the
+patches, MIDI and multi-output all live in a plain C core with no UI
+dependency. The control surface is a separate layer talking to that core.
+v1's control surface is the keyboard; the next is an immediate-mode panel
+(Nuklear or microui) rendered by SDL in a second window, which is enough for
+sliders, bypass buttons, patch grid and MIDI-learn state. Qt becomes worth
+its weight only if the app grows a project browser, dockable panels and
+native menus. The core-plus-surface split means that decision can be made
+late without rewriting anything that touches pixels.
 
 **Non-goals**
 
