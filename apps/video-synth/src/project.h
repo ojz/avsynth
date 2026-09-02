@@ -35,6 +35,9 @@ int  project_save_patch(Project *p, int slot, const char *name, const Rack *rack
  * Does not talk to the voice: call rack_send_all() afterwards. */
 int  project_load_patch(Project *p, int slot, Rack *rack);
 
+/* Number of saved patches, or -1 on error. */
+int  project_patch_count(Project *p);
+
 const char *project_path(const Project *p);
 
 #endif

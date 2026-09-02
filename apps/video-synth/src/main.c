@@ -44,6 +44,90 @@ static void notice(Window *win, const char *msg)
     fprintf(stderr, "%s\n", msg);
 }
 
+/* ---- starter patches, ported from the feedback.ps1 presets ---- */
+
+static int mod_index(const Rack *r, const char *name)
+{
+    for (int m = 0; m < r->nmods; m++)
+        if (!strcmp(r->mods[m].name, name)) return m;
+    return -1;
+}
+
+static void set_knob(Rack *r, const char *mod, const char *opt, double v)
+{
+    int m = mod_index(r, mod);
+    if (m < 0) return;
+    for (int k = 0; k < r->mods[m].nknobs; k++)
+        if (!strcmp(r->mods[m].knobs[k].opt, opt)) r->values[m][k] = v;
+}
+
+static void set_on(Rack *r, const char *mod, int on)
+{
+    int m = mod_index(r, mod);
+    if (m >= 0) r->enabled[m] = on;
+}
+
+static void neutral(Rack *r)
+{
+    for (int m = 0; m < r->nmods; m++) {
+        r->enabled[m] = r->mods[m].enabled_default;
+        for (int k = 0; k < r->mods[m].nknobs; k++)
+            r->values[m][k] = r->mods[m].knobs[k].neutral;
+    }
+}
+
+static void seed_starter_patches(Project *proj, Rack *r)
+{
+    /* 1 init: everything neutral */
+    neutral(r);
+    project_save_patch(proj, 1, "init", r);
+
+    /* 2 spin: 1.5 degrees per frame */
+    neutral(r);
+    set_knob(r, "rot", "angle", 0.026);
+    project_save_patch(proj, 2, "spin", r);
+
+    /* 3 tunnel: slight zoom in, slow rotation, saturated */
+    neutral(r);
+    set_knob(r, "zoom", "w", 1.02);
+    set_knob(r, "rot", "angle", 0.014);
+    set_knob(r, "hue", "s", 1.15);
+    project_save_patch(proj, 3, "tunnel", r);
+
+    /* 4 trail: long decay */
+    neutral(r);
+    set_knob(r, "trail", "decay", 0.94);
+    project_save_patch(proj, 4, "trail", r);
+
+    /* 5 invert */
+    neutral(r);
+    set_on(r, "neg", 1);
+    project_save_patch(proj, 5, "invert", r);
+
+    /* 6 edges */
+    neutral(r);
+    set_on(r, "edge", 1);
+    project_save_patch(proj, 6, "edge", r);
+
+    /* 7 chroma: rgb split with a little zoom out */
+    neutral(r);
+    set_knob(r, "shift", "rh", 4);
+    set_knob(r, "shift", "bh", -4);
+    set_knob(r, "zoom", "w", 0.98);
+    project_save_patch(proj, 7, "chroma", r);
+
+    /* 8 melt: trail + blur + zoom in */
+    neutral(r);
+    set_knob(r, "trail", "decay", 0.9);
+    set_on(r, "blur", 1);
+    set_knob(r, "blur", "sigma", 1.5);
+    set_knob(r, "zoom", "w", 1.03);
+    project_save_patch(proj, 8, "melt", r);
+
+    neutral(r);
+    fprintf(stderr, "seeded 8 starter patches (1 init, 2 spin, 3 tunnel, 4 trail, 5 invert, 6 edge, 7 chroma, 8 melt)\n");
+}
+
 /* 1..9 -> 1..9, 0 -> 10, else 0 */
 static int slot_for_key(SDL_Keycode k)
 {
@@ -131,6 +215,11 @@ int main(int argc, char **argv)
         cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h, cfg.cap_fps);
 
     int patch_slot = 0;   /* last loaded/saved slot, for the title */
+
+    if (project_patch_count(proj) == 0) {
+        seed_starter_patches(proj, &rack);
+        rack_reset_all(&rack, voice);
+    }
     show_status(win, &rack, patch_slot);
 
     if (selftest) {

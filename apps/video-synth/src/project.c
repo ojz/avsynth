@@ -121,6 +121,15 @@ void project_close(Project *p)
 
 const char *project_path(const Project *p) { return p->path; }
 
+int project_patch_count(Project *p)
+{
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(p->db, "SELECT count(*) FROM patch", -1, &st, NULL)) return -1;
+    int n = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : -1;
+    sqlite3_finalize(st);
+    return n;
+}
+
 int project_load_geometry(Project *p, Geometry *g)
 {
     sqlite3_stmt *st = NULL;
