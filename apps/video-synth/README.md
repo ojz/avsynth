@@ -50,7 +50,7 @@ The window is borderless. Put it inside the capture region for feedback.
 | Key | Action |
 |---|---|
 | left-drag | move window |
-| Alt + right-drag | resize window |
+| right-drag | resize window (drag right/down = bigger) |
 | Tab / Shift+Tab | select next / previous control |
 | Up / Down (or Right / Left) | nudge selected knob; Shift = fine, Ctrl = coarse |
 | Space | bypass / enable the selected module |

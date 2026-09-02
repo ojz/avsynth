@@ -7,7 +7,8 @@
 /*
  * Borderless output window with app-implemented move and resize.
  *
- * Left-drag (with or without Alt) moves the window. Alt+right-drag resizes it.
+ * Left-drag moves the window. Right-drag resizes it. No Alt modifier: AltSnap
+ * and similar tools hook Alt+mouse globally before the app ever sees it.
  * Both are done from our own event loop with SDL_SetWindowPosition/Size, so the
  * OS never enters its modal move loop and the picture keeps updating.
  */

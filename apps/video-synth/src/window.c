@@ -72,11 +72,6 @@ void window_destroy(Window *win)
     free(win);
 }
 
-static int alt_down(void)
-{
-    return (SDL_GetModState() & KMOD_ALT) != 0;
-}
-
 int window_handle_event(Window *win, const SDL_Event *ev)
 {
     switch (ev->type) {
@@ -84,7 +79,7 @@ int window_handle_event(Window *win, const SDL_Event *ev)
         if (win->fullscreen) return 0;
         if (ev->button.button == SDL_BUTTON_LEFT)
             win->drag = DRAG_MOVE;
-        else if (ev->button.button == SDL_BUTTON_RIGHT && alt_down())
+        else if (ev->button.button == SDL_BUTTON_RIGHT)
             win->drag = DRAG_RESIZE;
         else
             return 0;

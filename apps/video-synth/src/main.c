@@ -208,7 +208,7 @@ int main(int argc, char **argv)
 
     fprintf(stderr,
         "vsynth M3: capture %d,%d %dx%d @%dfps\n"
-        "  mouse: left-drag move, alt+right-drag resize\n"
+        "  mouse: left-drag move, right-drag resize\n"
         "  tab/shift+tab select knob, up/down nudge (shift fine, ctrl coarse)\n"
         "  space bypass module, backspace reset knob, r reset all\n"
         "  1-9,0 load patch slot, shift+1-9,0 save slot, f fullscreen, q quit\n",

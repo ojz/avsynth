@@ -4,3 +4,4 @@ build/
 *.db-shm
 .cache/
 compile_commands.json
+*.vsynth
