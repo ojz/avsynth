@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define K(label, opt, min, max, neutral, step) \
     { label, opt, NULL, NULL, NULL, min, max, neutral, step }
@@ -232,4 +233,73 @@ void rack_describe_selected(const Rack *r, char *buf, size_t cap)
         snprintf(buf, cap, "[%d/%d] %s.%s = %g  [%s]", r->sel + 1, r->ncontrols,
                  md->name, kd->label, r->values[c.module][c.knob], state);
     }
+}
+
+static double snap(const KnobDef *kd, double val)
+{
+    if (kd->step > 0)
+        val = kd->neutral + round((val - kd->neutral) / kd->step) * kd->step;
+    val = clampd(val, kd->min, kd->max);
+    return round(val * 1e6) / 1e6;
+}
+
+void rack_set_control(Rack *r, Voice *v, int control, double value)
+{
+    if (control < 0 || control >= r->ncontrols) return;
+    Control c = r->controls[control];
+    if (c.knob < 0) {
+        r->enabled[c.module] = value >= 0.5;
+        rack_send_enable(r, v, c.module);
+        return;
+    }
+    const KnobDef *kd = &r->mods[c.module].knobs[c.knob];
+    r->values[c.module][c.knob] = snap(kd, value);
+    rack_send_knob(r, v, c.module, c.knob);
+}
+
+void rack_toggle_module(Rack *r, Voice *v, int m)
+{
+    if (m < 0 || m >= r->nmods || !r->mods[m].bypassable) return;
+    r->enabled[m] = !r->enabled[m];
+    rack_send_enable(r, v, m);
+}
+
+/* xorshift32; seeded from the clock on first use. Quality is irrelevant here. */
+static unsigned rng_state;
+
+static double rnd(void)   /* [0,1) */
+{
+    if (!rng_state) {
+        rng_state = (unsigned)time(NULL) ^ ((unsigned)clock() << 8) ^ 0x9e3779b9u;
+        if (!rng_state) rng_state = 1;
+    }
+    unsigned x = rng_state;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    rng_state = x;
+    return (x >> 8) / 16777216.0;
+}
+
+void rack_randomize(Rack *r, Voice *v, double depth)
+{
+    depth = clampd(depth, 0, 1);
+    for (int m = 0; m < r->nmods; m++) {
+        const ModuleDef *md = &r->mods[m];
+        if (md->bypassable) {
+            if (md->enabled_default)
+                r->enabled[m] = rnd() < 0.92;
+            else
+                r->enabled[m] = rnd() < 0.15 + 0.35 * depth;
+        }
+        for (int k = 0; k < md->nknobs; k++) {
+            const KnobDef *kd = &md->knobs[k];
+            double val = kd->neutral;
+            if (rnd() < 0.65) {
+                double u = rnd() * 2 - 1;                 /* [-1,1] */
+                double side = u < 0 ? kd->neutral - kd->min : kd->max - kd->neutral;
+                val = kd->neutral + (u < 0 ? -1 : 1) * u * u * side * depth;
+            }
+            r->values[m][k] = snap(kd, val);
+        }
+    }
+    rack_send_all(r, v);
 }

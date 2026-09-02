@@ -13,6 +13,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(AV REQUIRED IMPORTED_TARGET
   libavfilter libavformat libavcodec libavdevice libavutil)
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+pkg_check_modules(SDL2_TTF REQUIRED IMPORTED_TARGET SDL2_ttf)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 
 add_executable(vsynth
@@ -21,11 +22,13 @@ add_executable(vsynth
   src/voice.c
   src/rack.c
   src/project.c
+  src/picker.c
+  src/hud.c
 )
 
 target_include_directories(vsynth PRIVATE src)
 target_link_libraries(vsynth PRIVATE
-  PkgConfig::AV PkgConfig::SDL2 PkgConfig::SQLITE)
+  PkgConfig::AV PkgConfig::SDL2 PkgConfig::SDL2_TTF PkgConfig::SQLITE)
 
 if(MSVC)
   target_compile_options(vsynth PRIVATE /W4)

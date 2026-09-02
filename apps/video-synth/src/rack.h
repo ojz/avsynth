@@ -74,6 +74,15 @@ void rack_toggle_selected(Rack *r, Voice *v);
 void rack_reset_selected(Rack *r, Voice *v);
 void rack_reset_all(Rack *r, Voice *v);
 
+/* Set one control directly (panel drag). Clamps, snaps to step, sends. */
+void rack_set_control(Rack *r, Voice *v, int control, double value);
+void rack_toggle_module(Rack *r, Voice *v, int module);
+
+/* Randomize: knobs wander away from neutral by up to depth (0..1) of their
+ * range, with a bias towards small moves; off-by-default modules switch on
+ * with a probability that grows with depth. */
+void rack_randomize(Rack *r, Voice *v, double depth);
+
 /* One-line status for the selected control, e.g. "rot.angle = 0.031  [on]". */
 void rack_describe_selected(const Rack *r, char *buf, size_t cap);
 

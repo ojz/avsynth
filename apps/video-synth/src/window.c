@@ -18,6 +18,9 @@ struct Window {
     int           grab_ww, grab_wh;     /* window size at grab */
 
     int           fullscreen;
+
+    WindowOverlayFn overlay;
+    void           *overlay_ud;
 };
 
 #define MIN_SIZE 64
@@ -145,7 +148,20 @@ void window_present(Window *win)
     SDL_RenderClear(win->ren);
     if (win->has_frame)
         SDL_RenderCopy(win->ren, win->tex, NULL, NULL);
+    if (win->overlay) {
+        int w, h;
+        SDL_GetRendererOutputSize(win->ren, &w, &h);
+        win->overlay(win->ren, w, h, win->overlay_ud);
+    }
     SDL_RenderPresent(win->ren);
+}
+
+SDL_Renderer *window_renderer(Window *win) { return win->ren; }
+
+void window_set_overlay(Window *win, WindowOverlayFn fn, void *ud)
+{
+    win->overlay = fn;
+    win->overlay_ud = ud;
 }
 
 void window_get_geometry(const Window *win, int *x, int *y, int *w, int *h)
@@ -163,4 +179,22 @@ void window_toggle_fullscreen(Window *win)
 {
     win->fullscreen = !win->fullscreen;
     SDL_SetWindowFullscreen(win->sdl, win->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
+
+int window_save_bmp(Window *win, const char *path)
+{
+    int w, h;
+    SDL_GetRendererOutputSize(win->ren, &w, &h);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!s) return -1;
+    window_present(win);   /* redraw so the read-back sees a complete frame */
+    if (SDL_RenderReadPixels(win->ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) != 0) {
+        fprintf(stderr, "screenshot: %s\n", SDL_GetError());
+        SDL_FreeSurface(s);
+        return -1;
+    }
+    int rc = SDL_SaveBMP(s, path);
+    SDL_FreeSurface(s);
+    if (rc == 0) fprintf(stderr, "screenshot saved: %s\n", path);
+    return rc;
 }

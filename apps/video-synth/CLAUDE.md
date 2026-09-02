@@ -9,7 +9,7 @@ ffmpeg/ffplay one-liner rig; its CLAUDE.md holds the ffplay-era environment note
 
 ## Build and run (Windows)
 
-Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 8 dev libs, SDL2, sqlite3). The Bash
+Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 8 dev libs, SDL2, SDL2_ttf, sqlite3). The Bash
 tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so use absolute paths:
 
 ```sh
@@ -18,7 +18,8 @@ PATH="/c/msys64/ucrt64/bin:$PATH" ./build/vsynth.exe --selftest
 ```
 
 From PowerShell the DLLs need `C:\msys64\ucrt64\bin` on PATH. There is no `python` on this machine;
-use sed/heredocs for scripted edits. Git identity for this repo is the personal gmail one, not the
+use sed for scripted edits. Bash-tool heredocs containing a single quote fail to parse; use
+the Write tool for such files. Git identity for this repo is the personal gmail one, not the
 Flexso work email.
 
 ## Environment facts (verified)
@@ -31,6 +32,10 @@ Flexso work email.
 
 ## Code rules
 
+- Modules: `window.c` output window + overlay hook, `hud.c` on-screen panel (SDL2_ttf glyph
+  atlas, system font lookup), `picker.c` modal region picker, `voice.c` capture thread, `rack.c`
+  module table, `project.c` SQLite. Changing the capture region restarts the voice
+  (`restart_voice` in main.c); knob changes never do.
 - Rack modules live in the table in `src/rack.c`. A filter qualifies only if its options accept
   runtime commands (`T` flag per option in `ffmpeg -h filter=X`) and it supports timeline `enable`
   for bypass. crop has no timeline support.

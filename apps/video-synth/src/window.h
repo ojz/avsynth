@@ -30,4 +30,14 @@ void    window_get_geometry(const Window *win, int *x, int *y, int *w, int *h);
 void    window_set_title(Window *win, const char *title);
 void    window_toggle_fullscreen(Window *win);
 
+/* Save what is currently on screen (frame + overlay) as a BMP. */
+int     window_save_bmp(Window *win, const char *path);
+
+/* Renderer, for building textures (HUD atlas). */
+SDL_Renderer *window_renderer(Window *win);
+
+/* Overlay drawn on top of every presented frame, in window pixel coordinates. */
+typedef void (*WindowOverlayFn)(SDL_Renderer *ren, int w, int h, void *ud);
+void    window_set_overlay(Window *win, WindowOverlayFn fn, void *ud);
+
 #endif

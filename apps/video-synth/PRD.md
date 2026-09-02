@@ -230,8 +230,8 @@ panel or MIDI arrives.
 
 | Key | Action |
 |---|---|
-| Alt+left-drag / left-drag | move window |
-| Alt+right-drag | resize window |
+| left-drag | move window |
+| right-drag | resize window (no Alt: AltSnap-style tools eat Alt+mouse) |
 | `1`–`9`, `0` | load patch slot 1–10 |
 | Shift+`1`–`0` | save current knobs to slot |
 | Tab / Shift+Tab | select next / previous knob |
@@ -239,13 +239,18 @@ panel or MIDI arrives.
 | Space | toggle bypass of selected knob's module |
 | Backspace | reset selected knob to neutral |
 | `r` | reset all knobs (init patch) |
-| `c` | re-select capture region (drag on a translucent overlay) |
+| `c` | re-select capture region (drag on a translucent overlay; Esc keeps the old one) |
+| `x` / Shift+`x` | randomize the rack, gently / wildly |
+| `h` | hide / show the on-screen panel |
 | `f` | toggle fullscreen |
 | Esc / `q` | quit, saving window and capture geometry |
 
-Feedback to the player: window title shows `module.knob = value` for the
-selected knob, and a one-line log on stderr. On-screen text needs a font
-renderer and is deferred to the panel milestone.
+Feedback to the player: an on-screen panel (SDL2_ttf, system monospace font)
+lists every control with a value bar and is mouse-operable (click selects,
+drag sets, wheel nudges, clicking the module name bypasses). Added 2026-09-02
+after the first hands-on test: the keyboard alone was not discoverable. Also the
+window title shows `module.knob = value` for the
+selected knob, and a one-line log on stderr.
 
 ## 7. Milestones for tonight
 
@@ -258,7 +263,8 @@ repo is still coherent.
 | M1 | 60 min | The loop | gdigrab region -> hardcoded graph (the `tunnel` preset) -> window. Picture keeps moving while the window is dragged. Feature parity with the pwsh rig. |
 | M2 | 60 min | The rack | Default rack from a C table, all modules at neutral. Tab/arrows send commands. Space bypasses. Verify the four *verify* neutrals. |
 | M3 | 45 min | Patches | SQLite project file, default rack inserted on create, save/load slots, geometry persisted. Port 4–5 presets as patches. |
-| M4 | rest | Stretch | Morph between two slots over 2 s. Then Linux build check on the Arch box. |
+| M4 | 90 min | Playable | Region picker (`c`), randomize (`x`), on-screen panel with mouse. Done 2026-09-02. |
+| M5 | next | Stretch | Morph between two slots over 2 s. Multiple sources / voices (see section 2). Then Linux build check on the Arch box. |
 
 ## 8. Decisions log
 

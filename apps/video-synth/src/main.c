@@ -1,8 +1,10 @@
 /*
  * vsynth — video feedback synthesizer. See PRD.md.
  *
- * M3: screen region -> fixed rack of libavfilter modules -> borderless window.
- *     Keyboard drives the knobs live. Patches live in a SQLite project file.
+ * Screen region -> fixed rack of libavfilter modules -> borderless window.
+ * Keyboard and an on-screen panel drive the knobs live. Patches live in a
+ * SQLite project file. The capture region is picked by dragging a rectangle
+ * on a translucent overlay.
  *
  *   vsynth [--project FILE] [--region X,Y,W,H] [--fps N] [--win X,Y,W,H]
  *          [--vf "chain"] [--selftest]
@@ -20,6 +22,8 @@
 #include "voice.h"
 #include "rack.h"
 #include "project.h"
+#include "picker.h"
+#include "hud.h"
 
 static int parse_rect(const char *s, int *x, int *y, int *w, int *h)
 {
@@ -38,9 +42,10 @@ static void show_status(Window *win, const Rack *rack, int patch_slot)
     fprintf(stderr, "%s\n", title);
 }
 
-static void notice(Window *win, const char *msg)
+static void notice(Window *win, Hud *hud, const char *msg)
 {
     window_set_title(win, msg);
+    hud_notice(hud, msg);
     fprintf(stderr, "%s\n", msg);
 }
 
@@ -136,6 +141,22 @@ static int slot_for_key(SDL_Keycode k)
     return 0;
 }
 
+/* Tear the voice down and bring it back on the current capture geometry. The
+ * rack chain is rebuilt with the current knob values, so no resend is needed. */
+static Voice *restart_voice(Voice *old, VoiceConfig *cfg, const Rack *rack,
+                            const char *raw_vf, char *chain, size_t chain_cap)
+{
+    voice_stop(old);
+    if (!raw_vf) {
+        if (rack_build_chain(rack, cfg->cap_w, cfg->cap_h, chain, chain_cap) < 0) {
+            fprintf(stderr, "rack chain too long\n");
+            return NULL;
+        }
+        cfg->filters = chain;
+    }
+    return voice_start(cfg);
+}
+
 int main(int argc, char **argv)
 {
     VoiceConfig cfg = { .cap_x = 0, .cap_y = 0, .cap_w = 800, .cap_h = 600,
@@ -145,9 +166,11 @@ int main(int argc, char **argv)
     const char *raw_vf = NULL;
     const char *project_file = "default.vsynth";
     int selftest = 0;
+    const char *screenshot = NULL;   /* --screenshot FILE: dump the window after 2 s */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) { selftest = 1; continue; }
+        if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) { screenshot = argv[++i]; continue; }
         if (!strcmp(argv[i], "--project") && i + 1 < argc) {
             project_file = argv[++i];
         } else if (!strcmp(argv[i], "--region") && i + 1 < argc) {
@@ -164,7 +187,7 @@ int main(int argc, char **argv)
         } else {
         usage:
             fprintf(stderr, "usage: %s [--project FILE] [--region X,Y,W,H] [--win X,Y,W,H] "
-                            "[--fps N] [--vf CHAIN] [--selftest]\n", argv[0]);
+                            "[--fps N] [--vf CHAIN] [--selftest] [--screenshot FILE.bmp]\n", argv[0]);
             return 2;
         }
     }
@@ -203,15 +226,21 @@ int main(int argc, char **argv)
     Window *win = window_create("vsynth", win_x, win_y, win_w, win_h);
     if (!win) return 1;
 
+    Hud *hud = hud_create(window_renderer(win), &rack);
+    if (!hud) return 1;
+    hud_set_capture(hud, cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h);
+    window_set_overlay(win, hud_draw, hud);
+
     Voice *voice = voice_start(&cfg);
     if (!voice) return 1;
 
     fprintf(stderr,
-        "vsynth M3: capture %d,%d %dx%d @%dfps\n"
-        "  mouse: left-drag move, right-drag resize\n"
+        "vsynth: capture %d,%d %dx%d @%dfps\n"
+        "  mouse: left-drag move, right-drag resize; panel: click row, drag bar, wheel nudges\n"
         "  tab/shift+tab select knob, up/down nudge (shift fine, ctrl coarse)\n"
-        "  space bypass module, backspace reset knob, r reset all\n"
-        "  1-9,0 load patch slot, shift+1-9,0 save slot, f fullscreen, q quit\n",
+        "  space bypass module, backspace reset knob, r reset all, x randomize (X wild)\n"
+        "  1-9,0 load patch slot, shift+1-9,0 save slot\n"
+        "  c pick capture region, h toggle panel, f fullscreen, q quit\n",
         cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h, cfg.cap_fps);
 
     int patch_slot = 0;   /* last loaded/saved slot, for the title */
@@ -225,7 +254,8 @@ int main(int argc, char **argv)
     if (selftest) {
         /* Push every knob and every enable through the command path once, so
          * any option that does not accept runtime commands shows up in the log.
-         * Then round-trip a patch through the project file. */
+         * Then round-trip a patch through the project file, randomize, and
+         * restart the voice on a different region. */
         rack_send_all(&rack, voice);
         for (int i = 0; i < rack.ncontrols; i++) {
             rack.sel = i;
@@ -242,14 +272,28 @@ int main(int argc, char **argv)
                 rc == 0 && rack.values[0][0] == 7 && rack.enabled[rack.nmods - 1] ? "OK" : "FAILED",
                 rack.values[0][0], rack.enabled[rack.nmods - 1]);
         rack_send_all(&rack, voice);
+        rack_randomize(&rack, voice, 0.3);
+        rack_set_control(&rack, voice, 0, 3);
+        fprintf(stderr, "selftest: set_control %s (rh=%g)\n", rack.values[0][0] == 3 ? "OK" : "FAILED",
+                rack.values[0][0]);
+        cfg.cap_w = 640; cfg.cap_h = 480;
+        voice = restart_voice(voice, &cfg, &rack, raw_vf, chain, sizeof chain);
+        if (!voice) return 1;
+        hud_set_capture(hud, cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h);
+        fprintf(stderr, "selftest: voice restarted on %dx%d\n", cfg.cap_w, cfg.cap_h);
     }
 
     int running = 1;
     int frames = 0;
     Uint32 fps_t0 = SDL_GetTicks();
+    Uint32 shot_at = screenshot ? fps_t0 + 2000 : 0;
     while (running) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+            if (hud_handle_event(hud, &ev, &rack, voice)) {
+                show_status(win, &rack, patch_slot);
+                continue;
+            }
             if (window_handle_event(win, &ev))
                 continue;
             switch (ev.type) {
@@ -283,7 +327,8 @@ int main(int argc, char **argv)
                             snprintf(msg, sizeof msg, "load slot %d FAILED", slot);
                         }
                     }
-                    notice(win, msg);
+                    hud_set_patch(hud, patch_slot);
+                    notice(win, hud, msg);
                     break;
                 }
                 switch (key) {
@@ -293,6 +338,9 @@ int main(int argc, char **argv)
                     break;
                 case SDLK_f:
                     window_toggle_fullscreen(win);
+                    break;
+                case SDLK_h:
+                    hud_toggle(hud);
                     break;
                 case SDLK_TAB:
                     rack_select_next(&rack, (mod & KMOD_SHIFT) ? -1 : 1);
@@ -319,8 +367,33 @@ int main(int argc, char **argv)
                 case SDLK_r:
                     rack_reset_all(&rack, voice);
                     patch_slot = 0;
+                    hud_set_patch(hud, 0);
                     show_status(win, &rack, patch_slot);
                     break;
+                case SDLK_x: {
+                    int wild = (mod & KMOD_SHIFT) != 0;
+                    rack_randomize(&rack, voice, wild ? 1.0 : 0.3);
+                    patch_slot = 0;
+                    hud_set_patch(hud, 0);
+                    notice(win, hud, wild ? "randomized (wild)" : "randomized");
+                    break;
+                }
+                case SDLK_c: {
+                    PickRect prev = { cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h }, next;
+                    if (picker_run(&prev, &next)) {
+                        cfg.cap_x = next.x; cfg.cap_y = next.y;
+                        cfg.cap_w = next.w; cfg.cap_h = next.h;
+                        voice = restart_voice(voice, &cfg, &rack, raw_vf, chain, sizeof chain);
+                        if (!voice) { running = 0; break; }
+                        hud_set_capture(hud, cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h);
+                        char msg[128];
+                        snprintf(msg, sizeof msg, "capture %d,%d %dx%d", cfg.cap_x, cfg.cap_y, cfg.cap_w, cfg.cap_h);
+                        notice(win, hud, msg);
+                    } else {
+                        notice(win, hud, "capture region unchanged");
+                    }
+                    break;
+                }
                 default:
                     break;
                 }
@@ -331,19 +404,26 @@ int main(int argc, char **argv)
             }
         }
 
-        if (voice_failed(voice)) {
+        if (shot_at && SDL_TICKS_PASSED(SDL_GetTicks(), shot_at)) {
+            window_save_bmp(win, screenshot);
+            shot_at = 0;
+        }
+
+        if (voice && voice_failed(voice)) {
             fprintf(stderr, "voice thread failed; exiting\n");
             running = 0;
         }
 
-        AVFrame *f = voice_take_frame(voice);
+        AVFrame *f = voice ? voice_take_frame(voice) : NULL;
         if (f) {
             window_present_frame(win, f->data[0], f->width, f->height, f->linesize[0]);
             av_frame_free(&f);
             frames++;
             Uint32 now = SDL_GetTicks();
             if (now - fps_t0 >= 2000) {
-                fprintf(stderr, "fps: %.1f\n", frames * 1000.0 / (now - fps_t0));
+                double fps = frames * 1000.0 / (now - fps_t0);
+                hud_set_fps(hud, fps);
+                fprintf(stderr, "fps: %.1f\n", fps);
                 frames = 0;
                 fps_t0 = now;
             }
@@ -360,6 +440,7 @@ int main(int argc, char **argv)
             out.cap_x, out.cap_y, out.cap_w, out.cap_h, out.win_x, out.win_y, out.win_w, out.win_h);
 
     voice_stop(voice);
+    hud_destroy(hud);
     window_destroy(win);
     project_close(proj);
     SDL_Quit();
