@@ -20,6 +20,7 @@ add_executable(vsynth
   src/window.c
   src/voice.c
   src/rack.c
+  src/project.c
 )
 
 target_include_directories(vsynth PRIVATE src)

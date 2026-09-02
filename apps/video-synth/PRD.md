@@ -193,26 +193,32 @@ one-line test in M2.
 | # | Name | Filter | Static args | Knobs (neutral) | Bypass default |
 |---|---|---|---|---|---|
 | 1 | `shift` | rgbashift | — | rh, rv, gh, gv, bh, bv (0) | on |
-| 2 | `zoom` | crop | — | w, h (iw, ih), x, y (centered) | on |
-| 3 | `rot` | rotate | `c=black:ow=iw:oh=ih` | angle (0) | on |
-| 4 | `shear` | shear | `c=black` | shx, shy (0) | on |
-| 5 | `lens` | lenscorrection | — | k1, k2 (0) | on |
-| 6 | `trail` | lagfun | — | decay (0) | on |
-| 7 | `mix` | tmix | `frames=3` | weights (1 0 0, *verify order*) | **off** |
-| 8 | `diff` | tblend | — | all_mode (normal), all_opacity (0, *verify*) | **off** |
-| 9 | `edge` | edgedetect | `mode=colormix` | none | **off** |
-| 10 | `blur` | gblur | — | sigma (0.01, *verify 0*) | on |
-| 11 | `sharp` | unsharp | — | none | **off** |
-| 12 | `hue` | hue | — | h (0), s (1), b (0) | on |
-| 13 | `eq` | eq | — | contrast (1), brightness (0), saturation (1), gamma (1) | on |
-| 14 | `neg` | negate | — | none | **off** |
-| 15 | `vig` | vignette | — | none | **off** |
-| 16 | `noise` | noise | `alls=20` | none | **off** |
+| 2 | `zoom` | crop | — | zoom (1.0) drives `w=iw/z`, `h=ih/z`; centered | not bypassable (crop has no timeline) |
+| 3 | `unzoom` | scale | capture WxH | none, restores size after the crop | fixed |
+| 4 | `rot` | rotate | `c=black:ow=iw:oh=ih` | angle (0) | on |
+| 5 | `shear` | shear | `c=black` | shx, shy (0) | on |
+| 6 | `lens` | lenscorrection | — | k1, k2 (0) | on |
+| 7 | `trail` | lagfun | — | decay (0) | on |
+| 8 | `mix` | tmix | `frames=3` | none | **off** |
+| 9 | `diff` | tblend | `all_mode=difference` | all_opacity (1) | **off** |
+| 10 | `edge` | edgedetect | `mode=colormix` | none | **off** |
+| 11 | `blur` | gblur | — | sigma (0.5) | **off** |
+| 12 | `sharp` | unsharp | `5:5:1.5` | none | **off** |
+| 13 | `hue` | hue | — | h (0), s (1), b (0) | on |
+| 14 | `eq` | eq | — | contrast (1), brightness (0), saturation (1), gamma (1) | on |
+| 15 | `neg` | negate | — | none | **off** |
+| 16 | `vig` | vignette | — | none | **off** |
+| 17 | `noise` | noise | `alls=20` | none | **off** |
 
-Note on `zoom`: crop with `w < iw` followed by the scale back to the window
-size is the classic feedback zoom. The graph tail is `scale=W:H,format=bgra`
-where W,H track the window; a resize only sends new `w`/`h` to `scale`, which
-are runtime knobs too.
+Verified in M2 (`vsynth --selftest`): this exact chain builds, and every knob
+and every `enable` above is accepted as a runtime command on ffmpeg 8
+(libavfilter 12). The earlier *verify* items were resolved by defaulting
+`mix`, `diff` and `blur` to bypassed rather than trusting a neutral value.
+
+Note on `zoom`: crop to `iw/z x ih/z` followed by `unzoom` scaling back to the
+capture size is the classic feedback zoom. The graph runs at capture
+resolution throughout; SDL scales the result to the window, so resizing the
+window never touches the graph.
 
 The 16 presets in `feedback.ps1` all map onto this rack as patches. Porting
 them is a data-entry task, not code.
