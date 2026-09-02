@@ -1,0 +1,6 @@
+build/
+*.db-journal
+*.db-wal
+*.db-shm
+.cache/
+compile_commands.json
