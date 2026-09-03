@@ -26,8 +26,20 @@
 #include "picker.h"
 #include "hud.h"
 #include "editor.h"
+#include "help.h"
 
-/* ---- app state, one instance ---- */
+/* ---- app state, one instance ----
+ *
+ * The UI is modal. Exactly one overlay owns the keyboard:
+ *   MAIN   the picture, nothing drawn but transient notices
+ *   PANEL  knobs and presets (h)
+ *   EDIT   chain text (e)
+ *   HELP   filter browser (F1)
+ * Esc always returns to MAIN. q quits from MAIN and PANEL only, since it is a
+ * letter in the other two. The mouse always belongs to the window (drag,
+ * resize) except on the panel's rows. */
+
+enum Mode { MODE_MAIN, MODE_PANEL, MODE_EDIT, MODE_HELP };
 
 typedef struct App {
     VoiceConfig cfg;
@@ -35,8 +47,11 @@ typedef struct App {
     Window  *win;
     Hud     *hud;
     Editor  *ed;
+    Help    *help;
     Voice   *voice;
     Rack     rack;
+    enum Mode mode;
+    enum Mode help_from;   /* where Esc from help returns to */
 
     int   chain_id;
     char  chain_name[64];
@@ -73,6 +88,27 @@ static void overlay(SDL_Renderer *ren, int w, int h, void *ud)
     App *a = ud;
     hud_draw(ren, w, h, a->hud);
     editor_draw(a->ed, ren, w, h);
+    help_draw(a->help, ren, w, h);
+}
+
+static void set_mode(App *a, enum Mode m)
+{
+    if (a->mode == MODE_EDIT && m != MODE_EDIT) editor_close(a->ed);
+    if (a->mode == MODE_HELP && m != MODE_HELP) help_close(a->help);
+    a->mode = m;
+    hud_set_visible(a->hud, m == MODE_PANEL);
+    if (m == MODE_EDIT && !editor_is_open(a->ed)) editor_open(a->ed, a->chain_text, a->chain_name);
+    if (m == MODE_MAIN) hud_notice(a->hud, "h panel  e edit  F1 help  q quit");
+}
+
+/* Help opened from the editor starts on the word under the cursor. */
+static void open_help(App *a)
+{
+    char word[64] = "";
+    if (a->mode == MODE_EDIT) editor_word_at_cursor(a->ed, word, sizeof word);
+    a->help_from = a->mode;
+    set_mode(a, MODE_HELP);
+    help_open(a->help, word);
 }
 
 /* Tear the voice down and bring it back on the current geometry and chain,
@@ -189,7 +225,8 @@ static int switch_chain(App *a, int id)
     Rack r;
     if (rack_from_chain(&r, text, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) < 0) {
         fprintf(stderr, "chain %s: %s\n", name, err);
-        editor_open(a->ed, text, name);
+        editor_load(a->ed, text, name);
+        set_mode(a, MODE_EDIT);
         editor_set_status(a->ed, err, 1);
         return -1;
     }
@@ -197,6 +234,7 @@ static int switch_chain(App *a, int id)
     a->chain_id = id;
     snprintf(a->chain_name, sizeof a->chain_name, "%s", name);
     snprintf(a->chain_text, sizeof a->chain_text, "%s", text);
+    editor_load(a->ed, text, name);
     a->preset_slot = 0;
     project_set_current_chain(a->proj, id);
     hud_set_chain_name(a->hud, name);
@@ -227,8 +265,8 @@ static void new_chain(App *a)
     int id = project_chain_add(a->proj, name, a->chain_text);
     if (id <= 0) { notice(a, "could not add chain"); return; }
     if (switch_chain(a, id) == 0) {
-        notice(a, "new chain (copy of the current one); e edits it");
-        editor_open(a->ed, a->chain_text, a->chain_name);
+        set_mode(a, MODE_EDIT);
+        editor_set_status(a->ed, "new chain, a copy of the previous one", 0);
     }
 }
 
@@ -249,6 +287,12 @@ static void apply_editor(App *a)
     a->preset_slot = 0;
     hud_set_patch(a->hud, 0);
     if (restart_voice(a) < 0) { editor_set_status(a->ed, "voice failed to start", 1); return; }
+    /* mark the buffer clean without moving the cursor */
+    {
+        char saved[RACK_CHAIN_CAP];
+        snprintf(saved, sizeof saved, "%s", text);
+        editor_load(a->ed, saved, a->chain_name);
+    }
     char msg[160];
     snprintf(msg, sizeof msg, "applied: %d modules, %d controls, %d tap%s",
              a->rack.nmods, a->rack.ncontrols, a->rack.ntaps, a->rack.ntaps == 1 ? "" : "s");
@@ -424,6 +468,9 @@ int main(int argc, char **argv)
     if (!a.hud) return 1;
     a.ed = editor_create(a.hud);
     if (!a.ed) return 1;
+    a.help = help_create(a.hud);
+    if (!a.help) return 1;
+    a.mode = MODE_PANEL;
     window_set_overlay(a.win, overlay, &a);
 
     if (project_chain_count(a.proj) == 0) seed_project(&a);
@@ -466,8 +513,9 @@ int main(int argc, char **argv)
         "  tab/shift+tab select knob, up/down nudge (shift fine, ctrl coarse)\n"
         "  space bypass module, backspace reset knob, r reset all, x randomize (X wild)\n"
         "  1-9,0 load preset, shift+1-9,0 save preset\n"
-        "  e edit chain (ctrl+enter applies), pgup/pgdn switch chain, ctrl+n new chain\n"
-        "  c pick capture region, h toggle panel, f fullscreen, q quit\n",
+        "  modes: h panel, e edit chain (ctrl+enter applies), F1 help, esc back to the picture\n"
+        "  pgup/pgdn switch chain, ctrl+n new chain\n"
+        "  c pick capture region, f fullscreen, q quit\n",
         a.cfg.cap_x, a.cfg.cap_y, a.cfg.cap_w, a.cfg.cap_h, a.cfg.cap_fps, a.chain_name);
     show_status(&a);
 
@@ -484,20 +532,40 @@ int main(int argc, char **argv)
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) { running = 0; break; }
 
-            if (editor_is_open(a.ed)) {
+            /* F1 (or ctrl+h) opens help from every mode */
+            if (ev.type == SDL_KEYDOWN && (ev.key.keysym.sym == SDLK_F1 ||
+                (ev.key.keysym.sym == SDLK_h && (SDL_GetModState() & KMOD_CTRL)))) {
+                if (a.mode == MODE_HELP) set_mode(&a, a.help_from); else open_help(&a);
+                continue;
+            }
+
+            /* the active overlay owns the keyboard; the mouse falls through to the window */
+            if (a.mode == MODE_EDIT) {
                 int act = editor_handle_event(a.ed, &ev);
                 if (act == EDITOR_APPLY) { apply_editor(&a); continue; }
-                if (act == EDITOR_CLOSE) { editor_close(a.ed); show_status(&a); continue; }
+                if (act == EDITOR_CLOSE) { set_mode(&a, MODE_MAIN); show_status(&a); continue; }
                 if (act == EDITOR_CONSUMED) continue;
-            }
-            if (hud_handle_event(a.hud, &ev, &a.rack, a.voice)) {
-                if (ev.type != SDL_MOUSEMOTION) show_status(&a);
-                continue;
+            } else if (a.mode == MODE_HELP) {
+                int act = help_handle_event(a.help, &ev);
+                if (act == HELP_CLOSE) { set_mode(&a, a.help_from); continue; }   /* help is a detour */
+                if (act == HELP_INSERT) {
+                    set_mode(&a, MODE_EDIT);
+                    editor_insert_filter(a.ed, help_snippet(a.help));
+                    editor_set_status(a.ed, "inserted; ctrl+enter applies", 0);
+                    continue;
+                }
+                if (act == HELP_CONSUMED) continue;
+            } else if (a.mode == MODE_PANEL) {
+                if (hud_handle_event(a.hud, &ev, &a.rack, a.voice)) {
+                    if (ev.type != SDL_MOUSEMOTION) show_status(&a);
+                    continue;
+                }
             }
             if (window_handle_event(a.win, &ev))
                 continue;
             if (ev.type != SDL_KEYDOWN) continue;
 
+            /* MAIN and PANEL share these keys */
             SDL_Keymod mod = SDL_GetModState();
             double factor = (mod & KMOD_SHIFT) ? 0.1 : (mod & KMOD_CTRL) ? 10.0 : 1.0;
             SDL_Keycode key = ev.key.keysym.sym;
@@ -530,6 +598,8 @@ int main(int argc, char **argv)
             }
             switch (key) {
             case SDLK_ESCAPE:
+                set_mode(&a, MODE_MAIN);
+                break;
             case SDLK_q:
                 running = 0;
                 break;
@@ -537,10 +607,10 @@ int main(int argc, char **argv)
                 window_toggle_fullscreen(a.win);
                 break;
             case SDLK_h:
-                hud_toggle(a.hud);
+                set_mode(&a, a.mode == MODE_PANEL ? MODE_MAIN : MODE_PANEL);
                 break;
             case SDLK_e:
-                editor_open(a.ed, a.chain_text, a.chain_name);
+                set_mode(&a, MODE_EDIT);
                 break;
             case SDLK_PAGEUP:
                 step_chain(&a, -1);
@@ -624,7 +694,7 @@ int main(int argc, char **argv)
             char msg[GRAPH_ERR_CAP + 32];
             snprintf(msg, sizeof msg, "voice failed: %s", voice_error(a.voice));
             fprintf(stderr, "%s\n", msg);
-            if (!editor_is_open(a.ed)) editor_open(a.ed, a.chain_text, a.chain_name);
+            set_mode(&a, MODE_EDIT);
             editor_set_status(a.ed, msg, 1);
             voice_stop(a.voice);
             a.voice = NULL;
@@ -665,6 +735,7 @@ int main(int argc, char **argv)
             out.cap_x, out.cap_y, out.cap_w, out.cap_h, out.win_x, out.win_y, out.win_w, out.win_h);
 
     voice_stop(a.voice);
+    help_destroy(a.help);
     editor_destroy(a.ed);
     hud_destroy(a.hud);
     window_destroy(a.win);

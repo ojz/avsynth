@@ -11,6 +11,7 @@ struct Editor {
     int   open;
 
     char  text[ED_CAP];
+    char  loaded[ED_CAP];   /* what the buffer last matched on disk; differs when dirty */
     int   len;
     int   cursor;
     int   anchor;      /* selection anchor, -1 when no selection */
@@ -32,7 +33,7 @@ static const SDL_Color C_TITLE  = { 255, 150,  30, 255 };
 static const SDL_Color C_ERR    = { 255,  90,  90, 255 };
 static const SDL_Color C_OK     = { 120, 220, 120, 255 };
 
-static const char *HINT = "ctrl+enter apply   esc close   ctrl+a/c/x/v   {W} {H} = capture size";
+static const char *HINT = "ctrl+enter apply   F1 help on word   esc back   ctrl+a/c/x/v   {W} {H} = capture size";
 
 Editor *editor_create(Hud *hud)
 {
@@ -45,19 +46,57 @@ Editor *editor_create(Hud *hud)
 
 void editor_destroy(Editor *e) { free(e); }
 
-void editor_open(Editor *e, const char *text, const char *title)
+void editor_load(Editor *e, const char *text, const char *title)
 {
     snprintf(e->text, sizeof e->text, "%s", text ? text : "");
+    snprintf(e->loaded, sizeof e->loaded, "%s", e->text);
     e->len = (int)strlen(e->text);
-    e->cursor = 0;
+    e->cursor = e->len;
     e->anchor = -1;
     e->scroll_line = e->scroll_col = 0;
     snprintf(e->title, sizeof e->title, "%s", title ? title : "chain");
     e->status[0] = 0;
     e->status_err = 0;
+}
+
+void editor_open(Editor *e, const char *text, const char *title)
+{
+    int dirty = strcmp(e->text, e->loaded) != 0;
+    if (!dirty) editor_load(e, text, title);
+    else snprintf(e->title, sizeof e->title, "%s *", title ? title : "chain");
     e->open = 1;
     e->blink0 = SDL_GetTicks();
     SDL_StartTextInput();
+}
+
+static void insert(Editor *e, const char *s);
+
+void editor_insert_filter(Editor *e, const char *snippet)
+{
+    /* need a separator unless we are at the start or right after , ; ] or a newline */
+    int i = e->cursor;
+    while (i > 0 && (e->text[i - 1] == ' ' || e->text[i - 1] == '\n')) i--;
+    int need_sep = i > 0 && !strchr(",;[", e->text[i - 1]);
+    if (need_sep) insert(e, ",\n");
+    insert(e, snippet);
+    e->status[0] = 0;
+}
+
+static int is_word(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+void editor_word_at_cursor(const Editor *e, char *buf, size_t cap)
+{
+    int a = e->cursor, b = e->cursor;
+    while (a > 0 && is_word(e->text[a - 1])) a--;
+    while (b < e->len && is_word(e->text[b])) b++;
+    int n = b - a;
+    if (n >= (int)cap) n = (int)cap - 1;
+    if (n < 0) n = 0;
+    memcpy(buf, e->text + a, n);
+    buf[n] = 0;
 }
 
 void editor_close(Editor *e)
@@ -73,11 +112,6 @@ void editor_set_status(Editor *e, const char *msg, int is_error)
 {
     snprintf(e->status, sizeof e->status, "%s", msg ? msg : "");
     e->status_err = is_error;
-}
-
-void editor_set_title(Editor *e, const char *title)
-{
-    snprintf(e->title, sizeof e->title, "%s", title ? title : "chain");
 }
 
 /* ---------- text model ---------- */
@@ -196,24 +230,7 @@ static void paste(Editor *e)
 
 /* ---------- events ---------- */
 
-static int in_rect(int x, int y, const SDL_Rect *r)
-{
-    return x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
-}
 
-static int pos_from_point(const Editor *e, int mx, int my)
-{
-    int lh = hud_line_h(e->hud), cw = hud_char_w(e->hud);
-    if (lh <= 0 || cw <= 0) return e->cursor;
-    int line = e->scroll_line + (my - e->area.y) / lh;
-    int col  = e->scroll_col + (mx - e->area.x + cw / 2) / cw;
-    if (line < 0) line = 0;
-    if (line >= line_count(e)) line = line_count(e) - 1;
-    int ls = pos_of_line(e, line), le = line_end(e, ls);
-    if (col < 0) col = 0;
-    if (col > le - ls) col = le - ls;
-    return ls + col;
-}
 
 int editor_handle_event(Editor *e, const SDL_Event *ev)
 {
@@ -266,29 +283,8 @@ int editor_handle_event(Editor *e, const SDL_Event *ev)
         return EDITOR_CONSUMED;
     }
 
-    case SDL_MOUSEBUTTONDOWN:
-        if (!in_rect(ev->button.x, ev->button.y, &e->box)) return EDITOR_NONE;
-        if (ev->button.button == SDL_BUTTON_LEFT && in_rect(ev->button.x, ev->button.y, &e->area))
-            move_to(e, pos_from_point(e, ev->button.x, ev->button.y), (SDL_GetModState() & KMOD_SHIFT) != 0);
-        return EDITOR_CONSUMED;
-    case SDL_MOUSEBUTTONUP:
-    case SDL_MOUSEMOTION: {
-        int mx = ev->type == SDL_MOUSEMOTION ? ev->motion.x : ev->button.x;
-        int my = ev->type == SDL_MOUSEMOTION ? ev->motion.y : ev->button.y;
-        if (ev->type == SDL_MOUSEMOTION && (ev->motion.state & SDL_BUTTON_LMASK) && in_rect(mx, my, &e->area))
-            move_to(e, pos_from_point(e, mx, my), 1);
-        return in_rect(mx, my, &e->box) ? EDITOR_CONSUMED : EDITOR_NONE;
-    }
-    case SDL_MOUSEWHEEL: {
-        int mx, my;
-        SDL_GetMouseState(&mx, &my);
-        if (!in_rect(mx, my, &e->box)) return EDITOR_NONE;
-        e->scroll_line -= ev->wheel.y * 3;
-        if (e->scroll_line < 0) e->scroll_line = 0;
-        return EDITOR_CONSUMED;
-    }
     default:
-        return EDITOR_NONE;
+        return EDITOR_NONE;   /* mouse goes to the window: drag and resize keep working */
     }
 }
 

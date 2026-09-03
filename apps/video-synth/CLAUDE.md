@@ -46,11 +46,17 @@ running it: the window pops up on their desktop.
 - Modules: `graph.c` builds a libavfilter graph from chain text (source, main output, taps, `{W}`/`{H}`
   substitution, error capture); `rack.c` derives modules and knobs from a parsed graph (override
   table for ranges, "written in the text" rule for which options become knobs); `voice.c` capture
-  thread with one mailbox per output; `editor.c` text overlay; `hud.c` panel, tap thumbnails and the
+  thread with one mailbox per output; `editor.c` text overlay (keyboard only); `help.c` filter
+  browser built from `av_filter_iterate` and AVOption tables; `hud.c` panel, tap thumbnails and the
   shared glyph atlas; `window.c` output window + overlay hook; `picker.c` modal region picker;
   `project.c` SQLite (chain / preset / preset_value / preset_enable). Changing the capture region or
   applying chain text restarts the voice (`restart_voice` in main.c) and resends all knobs; a knob
   change never does.
+- The UI is modal (`enum Mode` in main.c: MAIN, PANEL, EDIT, HELP). One overlay owns the keyboard;
+  Esc always goes to MAIN (from HELP: back to where it was opened); `q` quits only from MAIN/PANEL;
+  F1 opens help from anywhere. The mouse
+  always falls through to the window for drag/resize except on panel rows with the left button.
+  Add new views as modes, not as ad-hoc toggles.
 - A knob exists only for an option the user wrote in the chain text whose value is a plain number
   and whose AVOption carries `AV_OPT_FLAG_RUNTIME_PARAM`. Bypass exists for filters with
   `AVFILTER_FLAG_SUPPORT_TIMELINE`. Do not add hand-written module tables; add an `OVERRIDES` row

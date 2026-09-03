@@ -99,21 +99,29 @@ Rules of the road:
 Only the `crop` zoom trick is special-cased: `w=iw/Z:h=ih/Z` yields one `zoom`
 knob that drives both.
 
+## Modes
+
+The window is modal. One overlay at a time owns the keyboard; Esc always
+returns to the bare picture. The one exception is help, which is a detour: Esc
+there returns to wherever you opened it from, usually the editor. The mouse
+always belongs to the window: left-drag moves, right-drag resizes, in every
+mode, even over the editor or help.
+
+| Mode | Enter | What you see |
+|---|---|---|
+| **picture** | Esc from anywhere | just the video, plus a short notice now and then |
+| **panel** | `h` | knobs, presets, taps; the mouse works on the rows |
+| **edit** | `e` | the chain text; Ctrl+Enter applies |
+| **help** | `F1` (or Ctrl+`h`) | libavfilter's filter list and option tables |
+
+`q` quits from picture and panel. In edit and help it is a letter.
+
 ## Controls
 
-| Mouse | Action |
-|---|---|
-| left-drag on the video | move window |
-| right-drag on the video | resize window (drag right/down = bigger) |
-| click a panel row | select that knob |
-| drag on a row's bar | set the knob |
-| click a module name | bypass / enable that module |
-| wheel over a row | nudge the knob; Shift = fine, Ctrl = coarse |
-| click in the editor | place the cursor; drag selects |
+Picture and panel share these keys:
 
 | Key | Action |
 |---|---|
-| `e` | open the chain editor; Ctrl+Enter applies, Esc closes |
 | PageUp / PageDown | previous / next chain in the project |
 | Ctrl+`n` | new chain (a copy of the current one), opens the editor |
 | `c` | pick the capture region: desktop dims, current region shows in red; drag a new one, or Esc / right-click to keep it |
@@ -126,12 +134,23 @@ knob that drives both.
 | Shift + `x` | randomize wildly (full ranges) |
 | `1`–`9`, `0` | load preset slot 1–10 (physical digit row, so it works on AZERTY) |
 | Shift + `1`–`9`, `0` | save current knobs to that slot |
-| `h` | hide / show the panel and taps |
 | `f` | fullscreen toggle |
-| `q` / Esc | quit, saving geometry |
+| `q` | quit, saving geometry |
 
-Inside the editor: arrows, Home/End, Ctrl+Home/End, Shift-selection,
-Ctrl+A/C/X/V, Tab inserts two spaces.
+Panel mouse: click a row to select, drag its bar to set, click the module name
+to bypass, wheel to nudge (Shift fine, Ctrl coarse).
+
+Edit: arrows, Home/End, Ctrl+Home/End, Shift-selection, Ctrl+A/C/X/V, Tab
+inserts two spaces, Ctrl+Enter applies, `F1` opens help on the word under the
+cursor. Unapplied edits survive leaving and re-entering the mode (the title
+shows `*`); switching chains discards them.
+
+Help: type to narrow the list (name matches first, then descriptions), Up/Down
+to move, Enter shows the filter's options: type, default, range, and a green
+`T` on options that can be changed live. Enter again inserts
+`filter@filter=opt=default:...` with its live numeric options into the editor
+at the cursor, so the new module arrives with knobs. Backspace or Left goes
+back to the list.
 
 The panel header shows chain name, preset slot, capture region and fps.
 stderr logs the same.

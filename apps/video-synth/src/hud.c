@@ -181,6 +181,7 @@ void hud_destroy(Hud *h)
 }
 
 void hud_toggle(Hud *h)              { h->visible = !h->visible; }
+void hud_set_visible(Hud *h, int on) { h->visible = on; }
 int  hud_visible(const Hud *h)       { return h->visible; }
 void hud_set_patch(Hud *h, int slot) { h->patch_slot = slot; }
 void hud_set_fps(Hud *h, double fps) { h->fps = fps; }
@@ -247,10 +248,18 @@ static void fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8
 void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
 {
     Hud *h = ud;
-    if (!h->visible) { h->nrows = 0; h->panel = (SDL_Rect){ 0, 0, 0, 0 }; return; }
-    const Rack *r = h->rack;
-
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    if (!h->visible) {
+        h->nrows = 0;
+        h->panel = (SDL_Rect){ 0, 0, 0, 0 };
+        /* the bare picture still gets transient notices (mode hints, preset loads) */
+        if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
+            fill(ren, (SDL_Rect){ 8, 8, text_width(h, h->notice) + 12, h->line_h + 4 }, 0, 0, 0, 180);
+            text(h, 14, 10, C_NOTICE, h->notice);
+        }
+        return;
+    }
+    const Rack *r = h->rack;
 
     /* tap thumbnails along the bottom edge, right-aligned */
     if (h->ntaps > 0) {
@@ -277,9 +286,9 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
     const int bar_w   = 110;
     const int val_w   = h->char_w * 8;
     static const char *FOOTER[3] = {
-        "tab/arrows knob  space bypass  bksp reset  r reset all  x random",
-        "1-0 load preset  shift+1-0 save  e edit chain  pgup/pgdn chain",
-        "c region  f fullscreen  h hide panel  q quit" };
+        "tab/arrows knob  space bypass  bksp reset  r reset all  x random  c region",
+        "1-0 load preset  shift+1-0 save  pgup/pgdn chain  ctrl+n new chain",
+        "esc picture  e edit  F1 help  f fullscreen  q quit" };
     int panel_w = pad * 2 + name_w + label_w + bar_w + 8 + val_w;
     for (int i = 0; i < 3; i++)
         if (text_width(h, FOOTER[i]) + pad * 2 > panel_w) panel_w = text_width(h, FOOTER[i]) + pad * 2;
@@ -412,7 +421,7 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
     case SDL_MOUSEBUTTONDOWN: {
         int mx = ev->button.x, my = ev->button.y;
         if (!in_rect(mx, my, &h->panel)) return 0;
-        if (ev->button.button != SDL_BUTTON_LEFT) return 1;
+        if (ev->button.button != SDL_BUTTON_LEFT) return 0;   /* right-drag resizes, even over the panel */
         const Row *row = row_at(h, mx, my);
         if (!row) return 1;
         Control c = rack->controls[row->control];
@@ -435,7 +444,7 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
         return 1;
     case SDL_MOUSEBUTTONUP:
         if (h->drag_control >= 0) { h->drag_control = -1; return 1; }
-        return in_rect(ev->button.x, ev->button.y, &h->panel);
+        return ev->button.button == SDL_BUTTON_LEFT && in_rect(ev->button.x, ev->button.y, &h->panel);
     case SDL_MOUSEWHEEL: {
         int mx, my;
         SDL_GetMouseState(&mx, &my);

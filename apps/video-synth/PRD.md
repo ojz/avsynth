@@ -200,18 +200,28 @@ A new project gets three chains:
 
 ## 6. Interaction
 
-The video window is the only window. See README.md for the full key map.
-The shape:
+The video window is the only window, and it is **modal**: one overlay at a
+time owns the keyboard, Esc always returns to the bare picture, and the mouse
+always belongs to the window (drag, resize) so the picture can be placed and
+sized in any mode. See README.md for the full key map. The modes:
 
-- The **panel** (top-left) lists one row per control with a bar; mouse and
-  Tab/arrows drive it. `h` hides it, and the taps with it.
-- The **editor** (`e`, bottom half) is a plain text box. Ctrl+Enter applies,
-  Esc closes. A status line shows the libavfilter error or the key hints.
-- **Chains** switch with PageUp/PageDown; Ctrl+N copies the current one into
-  a new chain and opens the editor on it.
-- **Presets** are the digit row by physical position (the user's layout is
-  AZERTY, where digits are shifted); Shift saves.
-- **Taps** sit bottom-right, labelled with their output label.
+- **picture**: nothing drawn but a transient notice. `q` quits.
+- **panel** (`h`): one row per control with a bar; mouse on the rows, Tab and
+  arrows on the keyboard. Taps sit bottom-right, labelled with their output
+  label. `q` quits here too.
+- **edit** (`e`): the chain text, keyboard only. Ctrl+Enter applies, `F1`
+  opens help on the word under the cursor. Unapplied edits survive leaving
+  the mode. A status line shows the libavfilter error or the key hints.
+- **help** (`F1`, Ctrl+H): libavfilter's own manual. Type to narrow the list of
+  video filters, Enter for a filter's option table (type, default, range,
+  live flag, enum constants), Enter again to insert `filter@filter=...` with
+  its live numeric options into the editor, so it arrives with knobs.
+
+Chains switch with PageUp/PageDown; Ctrl+N copies the current one into a new
+chain and opens the editor on it. Presets are the digit row by physical
+position (the user's layout is AZERTY, where digits are shifted); Shift saves.
+
+Future views (options, MIDI learn) are new modes, not new toggles.
 
 Everything drawn over the video is fed back when the window sits inside the
 capture region. That is a known trade-off, to be solved by the second-window
@@ -227,7 +237,8 @@ control surface later, not by hiding features now.
 | M3 | 2026-09-02 | SQLite project file, patch slots, geometry persistence. |
 | M4 | 2026-09-02 | Region picker, randomize, on-screen panel with mouse. |
 | M5 | 2026-09-03 | **Text chains.** `graph.c`, knobs derived from the parsed graph, editor overlay with validate-then-apply, taps as thumbnails, chain/preset/project schema, app-data default location, AZERTY-safe keys. Fixed rack retired to a starter chain. |
-| M6 | next | Enum steppers, chain rename/delete, chain export as text. Then morph, then the Linux build check. |
+| M6 | 2026-09-03 | **Modal UI and help.** picture / panel / edit / help modes with Esc as the universal back; editor keyboard-only so the mouse always drags the window; filter browser from libavfilter metadata with insert-into-editor. |
+| M7 | next | Enum steppers, chain rename/delete, chain export as text. Then morph, then the Linux build check. |
 
 ## 8. Decisions log
 

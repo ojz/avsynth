@@ -26,6 +26,7 @@ add_executable(vsynth
   src/hud.c
   src/graph.c
   src/editor.c
+  src/help.c
 )
 
 target_include_directories(vsynth PRIVATE src)

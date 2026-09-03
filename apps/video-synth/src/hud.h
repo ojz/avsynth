@@ -27,6 +27,7 @@ Hud  *hud_create(SDL_Renderer *ren, const Rack *rack);
 void  hud_destroy(Hud *h);
 
 void  hud_toggle(Hud *h);
+void  hud_set_visible(Hud *h, int on);
 int   hud_visible(const Hud *h);
 
 void  hud_set_patch(Hud *h, int slot);
