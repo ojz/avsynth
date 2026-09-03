@@ -10,6 +10,15 @@
 #define LAST_GLYPH  126
 #define NGLYPH (LAST_GLYPH - FIRST_GLYPH + 1)
 #define NOTICE_MS 2500
+#define SHEET_MAX_W 820
+#define PAD 6
+
+const SDL_Color HUD_TEXT = { 235, 235, 235, 255 };
+const SDL_Color HUD_DIM  = { 150, 150, 150, 255 };
+const SDL_Color HUD_OFF  = {  95,  95,  95, 255 };
+const SDL_Color HUD_SEL  = { 255, 150,  30, 255 };
+const SDL_Color HUD_OK   = { 120, 220, 120, 255 };
+const SDL_Color HUD_ERR  = { 255,  90,  90, 255 };
 
 typedef struct Glyph { SDL_Rect src; int advance; } Glyph;
 
@@ -29,9 +38,10 @@ struct Hud {
     Glyph         glyphs[NGLYPH];
     int           line_h, char_w;
 
-    int    visible;
+    enum Mode mode;
     int    patch_slot;
     char   chain_name[64];
+    int    chain_index, chain_count;
 
     SDL_Texture *tap_tex[GRAPH_MAX_TAPS];
     int          tap_w[GRAPH_MAX_TAPS], tap_h[GRAPH_MAX_TAPS];
@@ -116,7 +126,7 @@ static int load_font(Hud *h, int px)
     return 0;
 }
 
-static int text_width(const Hud *h, const char *s)
+int hud_text_width(const Hud *h, const char *s)
 {
     if (!h->atlas) return 0;
     int w = 0;
@@ -128,7 +138,7 @@ static int text_width(const Hud *h, const char *s)
     return w;
 }
 
-static void text(Hud *h, int x, int y, SDL_Color col, const char *s)
+void hud_text(Hud *h, int x, int y, SDL_Color col, const char *s)
 {
     if (!h->atlas) return;
     SDL_SetTextureColorMod(h->atlas, col.r, col.g, col.b);
@@ -150,10 +160,19 @@ static void textf(Hud *h, int x, int y, SDL_Color col, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    text(h, x, y, col, buf);
+    hud_text(h, x, y, col, buf);
 }
 
-/* ---------- lifecycle ---------- */
+int  hud_line_h(const Hud *h) { return h->line_h; }
+int  hud_char_w(const Hud *h) { return h->char_w; }
+
+void hud_fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
+{
+    SDL_SetRenderDrawColor(ren, R, G, B, A);
+    SDL_RenderFillRect(ren, &r);
+}
+
+/* ---------- lifecycle & state ---------- */
 
 Hud *hud_create(SDL_Renderer *ren, const Rack *rack)
 {
@@ -161,7 +180,7 @@ Hud *hud_create(SDL_Renderer *ren, const Rack *rack)
     if (!h) return NULL;
     h->rack = rack;
     h->ren = ren;
-    h->visible = 1;
+    h->mode = MODE_PANEL;
     h->drag_control = -1;
     if (load_font(h, 13) != 0) {
         h->line_h = 14;
@@ -180,11 +199,10 @@ void hud_destroy(Hud *h)
     free(h);
 }
 
-void hud_toggle(Hud *h)              { h->visible = !h->visible; }
-void hud_set_visible(Hud *h, int on) { h->visible = on; }
-int  hud_visible(const Hud *h)       { return h->visible; }
-void hud_set_patch(Hud *h, int slot) { h->patch_slot = slot; }
-void hud_set_fps(Hud *h, double fps) { h->fps = fps; }
+void hud_set_mode(Hud *h, enum Mode m)  { h->mode = m; }
+enum Mode hud_mode(const Hud *h)        { return h->mode; }
+void hud_set_patch(Hud *h, int slot)    { h->patch_slot = slot; }
+void hud_set_fps(Hud *h, double fps)    { h->fps = fps; }
 void hud_set_capture(Hud *h, int x, int y, int w, int h_)
 {
     h->cap_x = x; h->cap_y = y; h->cap_w = w; h->cap_h = h_;
@@ -194,9 +212,11 @@ void hud_notice(Hud *h, const char *msg)
     snprintf(h->notice, sizeof h->notice, "%s", msg);
     h->notice_until = SDL_GetTicks() + NOTICE_MS;
 }
-void hud_set_chain_name(Hud *h, const char *name)
+void hud_set_chain(Hud *h, const char *name, int index, int count)
 {
     snprintf(h->chain_name, sizeof h->chain_name, "%s", name ? name : "");
+    h->chain_index = index;
+    h->chain_count = count;
 }
 
 void hud_set_tap_count(Hud *h, int n, const char names[][32])
@@ -223,81 +243,109 @@ void hud_set_tap_frame(Hud *h, int tap, const uint8_t *bgra, int w, int h_, int 
     SDL_UpdateTexture(h->tap_tex[tap], NULL, bgra, stride);
 }
 
-/* ---------- shared text API ---------- */
+/* ---------- sheet ---------- */
 
-static void text(Hud *h, int x, int y, SDL_Color col, const char *s);
-void hud_text(Hud *h, int x, int y, SDL_Color col, const char *s) { text(h, x, y, col, s); }
-int  hud_text_width(const Hud *h, const char *s) { return text_width(h, s); }
-int  hud_line_h(const Hud *h) { return h->line_h; }
-int  hud_char_w(const Hud *h) { return h->char_w; }
+static const char *TABS[MODE_COUNT] = { "", "F2 knobs", "F3 chain", "F1 help", "F4 project" };
+static const enum Mode TAB_ORDER[] = { MODE_HELP, MODE_PANEL, MODE_EDIT, MODE_PROJECT };
+
+SDL_Rect hud_sheet(Hud *h, SDL_Renderer *ren, int W, int H)
+{
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    int w = W - 16;
+    if (w > SHEET_MAX_W) w = SHEET_MAX_W;
+    SDL_Rect sheet = { 8, 8, w, H - 16 };
+    hud_fill(ren, sheet, 0, 0, 0, 215);
+    SDL_SetRenderDrawColor(ren, 255, 150, 30, 110);
+    SDL_RenderDrawRect(ren, &sheet);
+
+    int x = sheet.x + PAD, y = sheet.y + PAD;
+    int rowh = h->line_h + 2;
+
+    /* tabs */
+    for (size_t i = 0; i < sizeof TAB_ORDER / sizeof TAB_ORDER[0]; i++) {
+        enum Mode m = TAB_ORDER[i];
+        int tw = hud_text_width(h, TABS[m]) + 10;
+        if (m == h->mode) hud_fill(ren, (SDL_Rect){ x - 2, y - 2, tw, rowh + 2 }, HUD_SEL.r, HUD_SEL.g, HUD_SEL.b, 70);
+        hud_text(h, x + 3, y, m == h->mode ? HUD_SEL : HUD_DIM, TABS[m]);
+        x += tw + 8;
+    }
+
+    /* status, right-aligned */
+    char st[160];
+    int n = snprintf(st, sizeof st, "%.20s", h->chain_name[0] ? h->chain_name : "chain");
+    if (h->chain_count > 1) n += snprintf(st + n, sizeof st - n, " %d/%d", h->chain_index, h->chain_count);
+    if (h->patch_slot > 0)  n += snprintf(st + n, sizeof st - n, "  P%d", h->patch_slot);
+    snprintf(st + n, sizeof st - n, "  %dx%d  %.0f fps", h->cap_w, h->cap_h, h->fps);
+    int sw = hud_text_width(h, st);
+    if (x + sw < sheet.x + sheet.w - PAD)
+        hud_text(h, sheet.x + sheet.w - PAD - sw, y, HUD_DIM, st);
+
+    y += rowh + 2;
+    hud_fill(ren, (SDL_Rect){ sheet.x + PAD, y, sheet.w - PAD * 2, 1 }, 255, 255, 255, 60);
+    y += 4;
+
+    /* notice replaces the first body line for a moment */
+    SDL_Rect body = { sheet.x + PAD, y, sheet.w - PAD * 2, sheet.y + sheet.h - PAD - rowh - 6 - y };
+    h->panel = sheet;
+    return body;
+}
+
+void hud_footer(Hud *h, const SDL_Rect *body, const char *left, const char *right)
+{
+    int y = body->y + body->h + 2;
+    hud_fill(h->ren, (SDL_Rect){ body->x, y, body->w, 1 }, 255, 255, 255, 60);
+    y += 3;
+    int cw = h->char_w > 0 ? h->char_w : 7;
+    int rw = right ? hud_text_width(h, right) : 0;
+    int cols = (body->w - rw - (rw ? 2 * cw : 0)) / cw;   /* left text stops short of the right text */
+    if (cols < 0) cols = 0;
+    char buf[256];
+    if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
+        snprintf(buf, sizeof buf, "%.*s", cols, h->notice);
+        hud_text(h, body->x, y, HUD_OK, buf);
+    } else if (left) {
+        snprintf(buf, sizeof buf, "%.*s", cols, left);
+        hud_text(h, body->x, y, HUD_DIM, buf);
+    }
+    if (right) hud_text(h, body->x + body->w - rw, y, HUD_DIM, right);
+}
 
 /* ---------- drawing ---------- */
 
-static const SDL_Color C_TEXT   = { 235, 235, 235, 255 };
-static const SDL_Color C_DIM    = { 150, 150, 150, 255 };
-static const SDL_Color C_OFF    = {  95,  95,  95, 255 };
-static const SDL_Color C_SEL    = { 255, 150,  30, 255 };
-static const SDL_Color C_NOTICE = { 120, 220, 120, 255 };
-
-static void fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
+static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H)
 {
-    SDL_SetRenderDrawColor(ren, R, G, B, A);
-    SDL_RenderFillRect(ren, &r);
+    if (h->ntaps <= 0) return;
+    int th = H / 5;
+    if (th < 60) th = 60;
+    int tx = W - 8;
+    for (int i = h->ntaps - 1; i >= 0; i--) {
+        int tw = h->tap_h[i] > 0 ? th * h->tap_w[i] / h->tap_h[i] : th * 4 / 3;
+        tx -= tw;
+        SDL_Rect dst = { tx, H - 8 - th, tw, th };
+        hud_fill(ren, (SDL_Rect){ dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2 }, 0, 0, 0, 200);
+        if (h->tap_tex[i]) SDL_RenderCopy(ren, h->tap_tex[i], NULL, &dst);
+        SDL_SetRenderDrawColor(ren, 255, 255, 255, 60);
+        SDL_RenderDrawRect(ren, &dst);
+        hud_fill(ren, (SDL_Rect){ dst.x, dst.y, hud_text_width(h, h->tap_name[i]) + 6, h->line_h }, 0, 0, 0, 170);
+        hud_text(h, dst.x + 3, dst.y, HUD_DIM, h->tap_name[i]);
+        tx -= 6;
+    }
 }
 
-void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
+static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
 {
-    Hud *h = ud;
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    if (!h->visible) {
-        h->nrows = 0;
-        h->panel = (SDL_Rect){ 0, 0, 0, 0 };
-        /* the bare picture still gets transient notices (mode hints, preset loads) */
-        if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
-            fill(ren, (SDL_Rect){ 8, 8, text_width(h, h->notice) + 12, h->line_h + 4 }, 0, 0, 0, 180);
-            text(h, 14, 10, C_NOTICE, h->notice);
-        }
-        return;
-    }
     const Rack *r = h->rack;
+    SDL_Rect body = hud_sheet(h, ren, W, H);
 
-    /* tap thumbnails along the bottom edge, right-aligned */
-    if (h->ntaps > 0) {
-        int th = H / 5;
-        if (th < 60) th = 60;
-        int tx = W - 8;
-        for (int i = h->ntaps - 1; i >= 0; i--) {
-            int tw = h->tap_h[i] > 0 ? th * h->tap_w[i] / h->tap_h[i] : th * 4 / 3;
-            tx -= tw;
-            SDL_Rect dst = { tx, H - 8 - th, tw, th };
-            fill(ren, (SDL_Rect){ dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2 }, 0, 0, 0, 200);
-            if (h->tap_tex[i]) SDL_RenderCopy(ren, h->tap_tex[i], NULL, &dst);
-            SDL_SetRenderDrawColor(ren, 255, 255, 255, 60);
-            SDL_RenderDrawRect(ren, &dst);
-            fill(ren, (SDL_Rect){ dst.x, dst.y, text_width(h, h->tap_name[i]) + 6, h->line_h }, 0, 0, 0, 170);
-            text(h, dst.x + 3, dst.y, C_DIM, h->tap_name[i]);
-            tx -= 6;
-        }
-    }
-
-    const int pad = 6, rowh = h->line_h + 2;
+    const int rowh = h->line_h + 2;
     const int name_w  = h->char_w * 8 + 4;
-    const int label_w = h->char_w * 11 + 4;
-    const int bar_w   = 110;
-    const int val_w   = h->char_w * 8;
-    static const char *FOOTER[3] = {
-        "tab/arrows knob  space bypass  bksp reset  r reset all  x random  c region",
-        "1-0 load preset  shift+1-0 save  pgup/pgdn chain  ctrl+n new chain",
-        "esc picture  e edit  F1 help  f fullscreen  q quit" };
-    int panel_w = pad * 2 + name_w + label_w + bar_w + 8 + val_w;
-    for (int i = 0; i < 3; i++)
-        if (text_width(h, FOOTER[i]) + pad * 2 > panel_w) panel_w = text_width(h, FOOTER[i]) + pad * 2;
-    if (panel_w > W - 16) panel_w = W - 16;
+    const int label_w = h->char_w * 13 + 4;
+    int bar_w = body.w - name_w - label_w - h->char_w * 12;
+    if (bar_w > 220) bar_w = 220;
+    if (bar_w < 60) bar_w = 60;
 
-    const int header_rows = 1, footer_rows = 3;
-    int avail_h = H - 16 - pad * 2 - (header_rows + footer_rows) * rowh - 8;
-    int max_rows = avail_h / rowh;
-    if (max_rows < 3) max_rows = 3;
+    int max_rows = body.h / rowh;
+    if (max_rows < 1) max_rows = 1;
     int shown = r->ncontrols < max_rows ? r->ncontrols : max_rows;
 
     /* keep the selection in view */
@@ -306,35 +354,9 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
     if (h->scroll > r->ncontrols - shown) h->scroll = r->ncontrols - shown;
     if (h->scroll < 0) h->scroll = 0;
 
-    int panel_h = pad * 2 + (header_rows + shown + footer_rows) * rowh + 8;
-    h->panel = (SDL_Rect){ 8, 8, panel_w, panel_h };
-    fill(ren, h->panel, 0, 0, 0, 215);
-    SDL_SetRenderDrawColor(ren, 255, 255, 255, 40);
-    SDL_RenderDrawRect(ren, &h->panel);
-
-    int x = h->panel.x + pad, y = h->panel.y + pad;
-
-    /* header */
-    if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
-        text(h, x, y, C_NOTICE, h->notice);
-    } else {
-        char hdr[200];
-        int n = 0;
-        n += snprintf(hdr + n, sizeof hdr - n, "%.16s ", h->chain_name[0] ? h->chain_name : "chain");
-        if (h->patch_slot > 0) n += snprintf(hdr + n, sizeof hdr - n, "P%d  ", h->patch_slot);
-        else                   n += snprintf(hdr + n, sizeof hdr - n, "--  ");
-        snprintf(hdr + n, sizeof hdr - n, "cap %d,%d %dx%d   %.0f fps",
-                 h->cap_x, h->cap_y, h->cap_w, h->cap_h, h->fps);
-        text(h, x, y, C_DIM, hdr);
-    }
-    if (r->ncontrols > shown)
-        textf(h, x + panel_w - pad * 2 - h->char_w * 5, y, C_DIM, "%d/%d", r->sel + 1, r->ncontrols);
-    y += rowh + 2;
-    fill(ren, (SDL_Rect){ x, y - 1, panel_w - pad * 2, 1 }, 255, 255, 255, 60);
-    y += 2;
-
-    /* rows */
+    int x = body.x, y = body.y;
     h->nrows = 0;
+    if (r->ncontrols == 0) hud_text(h, x, y, HUD_DIM, "no knobs: write options into the chain text (F3)");
     for (int i = h->scroll; i < h->scroll + shown && i < r->ncontrols; i++) {
         Control c = r->controls[i];
         const ModuleDef *md = &r->mods[c.module];
@@ -343,49 +365,66 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
 
         Row *row = &h->rows[h->nrows++];
         row->control = i;
-        row->rect = (SDL_Rect){ h->panel.x, y, panel_w, rowh };
+        row->rect = (SDL_Rect){ body.x, y, body.w, rowh };
         row->name = (SDL_Rect){ x, y, name_w, rowh };
         row->bar  = (SDL_Rect){ x + name_w + label_w, y + 3, bar_w, rowh - 6 };
 
-        if (selected) fill(ren, row->rect, C_SEL.r, C_SEL.g, C_SEL.b, 70);
+        if (selected) hud_fill(ren, row->rect, HUD_SEL.r, HUD_SEL.g, HUD_SEL.b, 70);
 
-        SDL_Color tc = on ? (selected ? C_SEL : C_TEXT) : C_OFF;
-        SDL_Color nc = on ? C_DIM : C_OFF;
+        SDL_Color tc = on ? (selected ? HUD_SEL : HUD_TEXT) : HUD_OFF;
+        SDL_Color nc = on ? HUD_DIM : HUD_OFF;
 
         textf(h, x, y + 1, nc, "%.8s", md->label);
 
         if (c.knob < 0) {
-            text(h, x + name_w, y + 1, tc, on ? "[x] on" : "[ ] off");
+            hud_text(h, x + name_w, y + 1, tc, on ? "[x] on" : "[ ] off");
         } else {
             const KnobDef *kd = &md->knobs[c.knob];
-            text(h, x + name_w, y + 1, tc, kd->label);
+            textf(h, x + name_w, y + 1, tc, "%.13s", kd->label);
 
             /* bar: track, fill from neutral to value, marker at value */
             double v = r->values[c.module][c.knob];
             double span = kd->max - kd->min;
             double tv = span > 0 ? (v - kd->min) / span : 0;
             double tn = span > 0 ? (kd->neutral - kd->min) / span : 0;
-            fill(ren, row->bar, 255, 255, 255, on ? 30 : 15);
+            hud_fill(ren, row->bar, 255, 255, 255, on ? 30 : 15);
             int xv = row->bar.x + (int)(tv * (row->bar.w - 1));
             int xn = row->bar.x + (int)(tn * (row->bar.w - 1));
             SDL_Rect f = { xn < xv ? xn : xv, row->bar.y, abs(xv - xn) + 1, row->bar.h };
-            fill(ren, f, tc.r, tc.g, tc.b, on ? 110 : 50);
-            fill(ren, (SDL_Rect){ xv - 1, row->bar.y - 1, 3, row->bar.h + 2 }, tc.r, tc.g, tc.b, 255);
+            hud_fill(ren, f, tc.r, tc.g, tc.b, on ? 110 : 50);
+            hud_fill(ren, (SDL_Rect){ xv - 1, row->bar.y - 1, 3, row->bar.h + 2 }, tc.r, tc.g, tc.b, 255);
 
-            textf(h, row->bar.x + row->bar.w + 8, y + 1, tc, "%g", v);
+            char val[48];
+            rack_format_value(r, c.module, c.knob, val, sizeof val);
+            hud_text(h, row->bar.x + row->bar.w + 8, y + 1, tc, val);
         }
         y += rowh;
     }
 
-    /* footer */
-    y += 3;
-    fill(ren, (SDL_Rect){ x, y, panel_w - pad * 2, 1 }, 255, 255, 255, 60);
-    y += 4;
-    text(h, x, y, C_DIM, FOOTER[0]);
-    y += rowh;
-    text(h, x, y, C_DIM, FOOTER[1]);
-    y += rowh;
-    text(h, x, y, C_DIM, FOOTER[2]);
+    char right[32] = "";
+    if (r->ncontrols > shown) snprintf(right, sizeof right, "%d/%d", r->sel + 1, r->ncontrols);
+    hud_footer(h, &body, "tab/arrows knob  space bypass  bksp reset  r reset all  x random  1-0 preset  shift+1-0 save", right);
+}
+
+void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
+{
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    /* called last in the overlay, so the taps land on top of whatever sheet is up */
+    if (h->mode == MODE_PANEL) {
+        draw_panel(h, ren, W, H);
+        draw_taps(h, ren, W, H);
+        return;
+    }
+    if (h->mode != MODE_HELP && h->mode != MODE_PROJECT) draw_taps(h, ren, W, H);
+    h->nrows = 0;
+    if (h->mode == MODE_MAIN) {
+        h->panel = (SDL_Rect){ 0, 0, 0, 0 };
+        /* the bare picture still gets transient notices (mode hints, preset loads) */
+        if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
+            hud_fill(ren, (SDL_Rect){ 8, 8, hud_text_width(h, h->notice) + 12, h->line_h + 4 }, 0, 0, 0, 180);
+            hud_text(h, 14, 10, HUD_OK, h->notice);
+        }
+    }
 }
 
 /* ---------- mouse ---------- */
@@ -415,7 +454,7 @@ static void set_from_bar(Rack *rack, Voice *voice, const Row *row, int mx)
 
 int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
 {
-    if (!h->visible) return 0;
+    if (h->mode != MODE_PANEL) return 0;
 
     switch (ev->type) {
     case SDL_MOUSEBUTTONDOWN: {

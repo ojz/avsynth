@@ -34,6 +34,9 @@ int     editor_is_open(const Editor *e);
 
 const char *editor_text(const Editor *e);
 void    editor_set_status(Editor *e, const char *msg, int is_error);
+/* After a successful apply: the buffer now matches the chain; cursor stays put. */
+void    editor_mark_clean(Editor *e);
+int     editor_dirty(const Editor *e);
 
 /* Insert at the cursor, adding a separating comma when the text needs one. */
 void    editor_insert_filter(Editor *e, const char *snippet);

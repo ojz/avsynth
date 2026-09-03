@@ -347,6 +347,13 @@ static void derive_module(Rack *r, AVFilterContext *f, const Written *written)
                 heuristic_range(o, cur, kd);
             }
             kd->neutral = cur;
+            if (o->unit && option_is_int(o)) {
+                /* enum: step through the constants by value, show their names */
+                kd->cls = f->filter->priv_class;
+                kd->unit = o->unit;
+                kd->step = 1;
+                copy_str(kd->fmt, sizeof kd->fmt, "%.0f");
+            }
             r->values[m][md->nknobs] = cur;
             offsets[noffsets++] = o->offset;
             md->nknobs++;
@@ -502,6 +509,23 @@ void rack_reset_all(Rack *r, Voice *v)
     rack_send_all(r, v);
 }
 
+void rack_format_value(const Rack *r, int m, int k, char *buf, size_t cap)
+{
+    const KnobDef *kd = &r->mods[m].knobs[k];
+    double v = r->values[m][k];
+    if (kd->cls && kd->unit) {
+        const AVClass *cls = kd->cls;
+        const AVOption *c = NULL;
+        long long iv = (long long)v;
+        while ((c = av_opt_next(&cls, c)))
+            if (c->type == AV_OPT_TYPE_CONST && c->unit && !strcmp(c->unit, kd->unit) && c->default_val.i64 == iv) {
+                snprintf(buf, cap, "%s", c->name);
+                return;
+            }
+    }
+    snprintf(buf, cap, "%g", v);
+}
+
 void rack_describe_selected(const Rack *r, char *buf, size_t cap)
 {
     if (r->ncontrols == 0) { snprintf(buf, cap, "no controls"); return; }
@@ -512,8 +536,10 @@ void rack_describe_selected(const Rack *r, char *buf, size_t cap)
         snprintf(buf, cap, "[%d/%d] %s  [%s]", r->sel + 1, r->ncontrols, md->label, state);
     } else {
         const KnobDef *kd = &md->knobs[c.knob];
-        snprintf(buf, cap, "[%d/%d] %s.%s = %g  [%s]", r->sel + 1, r->ncontrols,
-                 md->label, kd->label, r->values[c.module][c.knob], state);
+        char val[48];
+        rack_format_value(r, c.module, c.knob, val, sizeof val);
+        snprintf(buf, cap, "[%d/%d] %s.%s = %s  [%s]", r->sel + 1, r->ncontrols,
+                 md->label, kd->label, val, state);
     }
 }
 

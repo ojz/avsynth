@@ -203,25 +203,33 @@ A new project gets three chains:
 The video window is the only window, and it is **modal**: one overlay at a
 time owns the keyboard, Esc always returns to the bare picture, and the mouse
 always belongs to the window (drag, resize) so the picture can be placed and
-sized in any mode. See README.md for the full key map. The modes:
+sized in any mode. Every mode draws into the **same sheet**: one translucent
+frame in the same place, a header with the F-key tabs (active one highlighted)
+and chain / preset / fps, a footer with that mode's keys. The user asked for
+this after the first modal version: modes that each looked different and sat
+in different corners were not modes, just toggles. See README.md for the full
+key map. The modes:
 
-- **picture**: nothing drawn but a transient notice. `q` quits.
-- **panel** (`h`): one row per control with a bar; mouse on the rows, Tab and
-  arrows on the keyboard. Taps sit bottom-right, labelled with their output
-  label. `q` quits here too.
-- **edit** (`e`): the chain text, keyboard only. Ctrl+Enter applies, `F1`
-  opens help on the word under the cursor. Unapplied edits survive leaving
-  the mode. A status line shows the libavfilter error or the key hints.
-- **help** (`F1`, Ctrl+H): libavfilter's own manual. Type to narrow the list of
+- **picture** (Esc): nothing drawn but a transient notice. `q` quits.
+- **knobs** (F2): one row per control with a bar; mouse on the rows, Tab and
+  arrows on the keyboard. Enum options show their constant's name. `q` quits.
+- **chain** (F3): the text, keyboard only. Ctrl+Enter applies and leaves the
+  cursor in place, `F1` opens help on the filter under the cursor. Unapplied
+  edits survive leaving the mode. A status line shows the libavfilter error.
+- **help** (F1, Ctrl+H): libavfilter's own manual. Type to narrow the list of
   video filters, Enter for a filter's option table (type, default, range,
   live flag, enum constants), Enter again to insert `filter@filter=...` with
-  its live numeric options into the editor, so it arrives with knobs.
+  its live numeric options into the editor, so it arrives with knobs. A
+  detour: Esc returns to where it was opened.
+- **project** (F4): the chains (switch, new, rename, delete with a second
+  Delete to confirm), the capture region and fps.
 
-Chains switch with PageUp/PageDown; Ctrl+N copies the current one into a new
-chain and opens the editor on it. Presets are the digit row by physical
-position (the user's layout is AZERTY, where digits are shifted); Shift saves.
+Taps sit bottom-right in every mode that shows the picture. PageUp/PageDown
+switch chains in every mode; F12 saves a screenshot from the frame buffer.
+Presets are the digit row by physical position (the user's layout is AZERTY,
+where digits are shifted); Shift saves.
 
-Future views (options, MIDI learn) are new modes, not new toggles.
+Future views (MIDI learn, modulators) are new tabs on the next F-keys.
 
 Everything drawn over the video is fed back when the window sits inside the
 capture region. That is a known trade-off, to be solved by the second-window

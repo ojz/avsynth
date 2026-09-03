@@ -59,11 +59,16 @@ void editor_load(Editor *e, const char *text, const char *title)
     e->status_err = 0;
 }
 
+int editor_dirty(const Editor *e) { return strcmp(e->text, e->loaded) != 0; }
+
+void editor_mark_clean(Editor *e)
+{
+    snprintf(e->loaded, sizeof e->loaded, "%s", e->text);
+}
+
 void editor_open(Editor *e, const char *text, const char *title)
 {
-    int dirty = strcmp(e->text, e->loaded) != 0;
-    if (!dirty) editor_load(e, text, title);
-    else snprintf(e->title, sizeof e->title, "%s *", title ? title : "chain");
+    if (!editor_dirty(e)) editor_load(e, text, title);
     e->open = 1;
     e->blink0 = SDL_GetTicks();
     SDL_StartTextInput();
@@ -272,8 +277,6 @@ int editor_handle_event(Editor *e, const SDL_Event *ev)
         case SDLK_DOWN:  move_line(e, +1, shift); break;
         case SDLK_HOME:  move_to(e, ctrl ? 0 : line_start(e, e->cursor), shift); break;
         case SDLK_END:   move_to(e, ctrl ? e->len : line_end(e, e->cursor), shift); break;
-        case SDLK_PAGEUP:   for (int i = 0; i < 10; i++) move_line(e, -1, shift); break;
-        case SDLK_PAGEDOWN: for (int i = 0; i < 10; i++) move_line(e, +1, shift); break;
         case SDLK_a: if (ctrl) { e->anchor = 0; e->cursor = e->len; } break;
         case SDLK_c: if (ctrl) copy_sel(e); break;
         case SDLK_x: if (ctrl) { copy_sel(e); if (has_sel(e)) delete_sel(e); } break;
@@ -290,52 +293,22 @@ int editor_handle_event(Editor *e, const SDL_Event *ev)
 
 /* ---------- drawing ---------- */
 
-static void fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
-{
-    SDL_SetRenderDrawColor(ren, R, G, B, A);
-    SDL_RenderFillRect(ren, &r);
-}
-
 void editor_draw(Editor *e, SDL_Renderer *ren, int W, int H)
 {
-    if (!e->open) { e->box = (SDL_Rect){ 0, 0, 0, 0 }; return; }
+    if (!e->open) return;
     Hud *hud = e->hud;
     int lh = hud_line_h(hud), cw = hud_char_w(hud);
     if (lh <= 0) lh = 14;
     if (cw <= 0) cw = 7;
-    const int pad = 6;
 
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-
-    int bh = H / 2 - 8;
-    if (bh < lh * 6 + pad * 4) bh = lh * 6 + pad * 4;
-    if (bh > H - 16) bh = H - 16;
-    e->box = (SDL_Rect){ 8, H - 8 - bh, W - 16, bh };
-    fill(ren, e->box, 0, 0, 0, 230);
-    SDL_SetRenderDrawColor(ren, 255, 150, 30, 120);
-    SDL_RenderDrawRect(ren, &e->box);
-
-    int x = e->box.x + pad, y = e->box.y + pad;
-    char hdr[128];
-    snprintf(hdr, sizeof hdr, "chain: %s", e->title);
-    hud_text(hud, x, y, C_TITLE, hdr);
-    {
-        char pos[64];
-        snprintf(pos, sizeof pos, "%d:%d  %d/%d", line_of(e, e->cursor) + 1,
-                 e->cursor - line_start(e, e->cursor) + 1, e->len, ED_CAP - 1);
-        hud_text(hud, e->box.x + e->box.w - pad - hud_text_width(hud, pos), y, C_DIM, pos);
-    }
-    y += lh + 3;
-    fill(ren, (SDL_Rect){ x, y, e->box.w - pad * 2, 1 }, 255, 255, 255, 60);
-    y += 3;
-
-    /* text area */
-    int area_h = e->box.y + e->box.h - pad - lh - 4 - y;
-    int rows = area_h / lh;
+    SDL_Rect body = hud_sheet(hud, ren, W, H);
+    int x = body.x, y = body.y;
+    int rows = (body.h - lh - 4) / lh;      /* one line kept for the status */
     if (rows < 1) rows = 1;
-    int cols = (e->box.w - pad * 2) / cw;
+    int cols = body.w / cw;
     if (cols < 8) cols = 8;
-    e->area = (SDL_Rect){ x, y, e->box.w - pad * 2, rows * lh };
+    e->area = (SDL_Rect){ x, y, body.w, rows * lh };
+    e->box = body;
 
     /* keep the cursor visible */
     int cline = line_of(e, e->cursor), ccol = e->cursor - line_start(e, e->cursor);
@@ -363,7 +336,7 @@ void editor_draw(Editor *e, SDL_Renderer *ren, int W, int H)
                 int c0 = a - ls - e->scroll_col, c1 = b - ls - e->scroll_col;
                 if (c0 < 0) c0 = 0;
                 if (c1 > cols) c1 = cols;
-                if (c1 > c0) fill(ren, (SDL_Rect){ x + c0 * cw, ly, (c1 - c0) * cw, lh }, 255, 150, 30, 70);
+                if (c1 > c0) hud_fill(ren, (SDL_Rect){ x + c0 * cw, ly, (c1 - c0) * cw, lh }, HUD_SEL.r, HUD_SEL.g, HUD_SEL.b, 70);
             }
         }
 
@@ -373,28 +346,28 @@ void editor_draw(Editor *e, SDL_Renderer *ren, int W, int H)
             if (n > (int)sizeof line - 1) n = (int)sizeof line - 1;
             memcpy(line, e->text + ls + e->scroll_col, n);
             line[n] = 0;
-            hud_text(hud, x, ly, C_TEXT, line);
+            hud_text(hud, x, ly, HUD_TEXT, line);
         }
 
         /* cursor */
         if (ls <= e->cursor && e->cursor <= le && ((SDL_GetTicks() - e->blink0) / 500) % 2 == 0) {
             int c = e->cursor - ls - e->scroll_col;
             if (c >= 0 && c <= cols)
-                fill(ren, (SDL_Rect){ x + c * cw, ly, 2, lh }, 255, 150, 30, 255);
+                hud_fill(ren, (SDL_Rect){ x + c * cw, ly, 2, lh }, HUD_SEL.r, HUD_SEL.g, HUD_SEL.b, 255);
         }
 
         if (le >= e->len) break;
         pos = le + 1;
     }
 
-    /* status line */
-    int sy = e->box.y + e->box.h - pad - lh;
-    fill(ren, (SDL_Rect){ x, sy - 3, e->box.w - pad * 2, 1 }, 255, 255, 255, 60);
+    /* status: last error or result, on the last body line */
     if (e->status[0]) {
         char st[512];
         snprintf(st, sizeof st, "%.*s", cols, e->status);
-        hud_text(hud, x, sy, e->status_err ? C_ERR : C_OK, st);
-    } else {
-        hud_text(hud, x, sy, C_DIM, HINT);
+        hud_text(hud, x, body.y + body.h - lh, e->status_err ? HUD_ERR : HUD_OK, st);
     }
+
+    char right[48];
+    snprintf(right, sizeof right, "%d:%d%s", cline + 1, ccol + 1, editor_dirty(e) ? "  modified" : "");
+    hud_footer(hud, &body, HINT, right);
 }

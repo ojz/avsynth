@@ -349,12 +349,6 @@ int help_handle_event(Help *h, const SDL_Event *ev)
 
 /* ---------- drawing ---------- */
 
-static void fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
-{
-    SDL_SetRenderDrawColor(ren, R, G, B, A);
-    SDL_RenderFillRect(ren, &r);
-}
-
 void help_draw(Help *h, SDL_Renderer *ren, int W, int H)
 {
     if (!h->open) return;
@@ -362,28 +356,21 @@ void help_draw(Help *h, SDL_Renderer *ren, int W, int H)
     int lh = hud_line_h(hud), cw = hud_char_w(hud);
     if (lh <= 0) lh = 14;
     if (cw <= 0) cw = 7;
-    const int pad = 6;
 
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    SDL_Rect box = { 8, 8, W - 16, H - 16 };
-    fill(ren, box, 0, 0, 0, 230);
-    SDL_SetRenderDrawColor(ren, 255, 150, 30, 120);
-    SDL_RenderDrawRect(ren, &box);
-
-    int x = box.x + pad, y = box.y + pad;
-    int cols = (box.w - pad * 2) / cw;
+    SDL_Rect body = hud_sheet(hud, ren, W, H);
+    int x = body.x, y = body.y;
+    int cols = body.w / cw;
+    if (cols < 8) cols = 8;
     char line[512];
 
     if (!h->detail) {
-        snprintf(line, sizeof line, "help: %s_", h->query);
+        snprintf(line, sizeof line, "search: %s_", h->query);
         hud_text(hud, x, y, C_TITLE, line);
         snprintf(line, sizeof line, "%d filters", h->nshown);
-        hud_text(hud, box.x + box.w - pad - hud_text_width(hud, line), y, C_DIM, line);
-        y += lh + 3;
-        fill(ren, (SDL_Rect){ x, y, box.w - pad * 2, 1 }, 255, 255, 255, 60);
-        y += 3;
+        hud_text(hud, body.x + body.w - hud_text_width(hud, line), y, C_DIM, line);
+        y += lh + 4;
 
-        int rows = (box.y + box.h - pad - lh - 4 - y) / lh;
+        int rows = (body.y + body.h - y) / lh;
         if (rows < 1) rows = 1;
         if (h->sel < h->scroll) h->scroll = h->sel;
         if (h->sel >= h->scroll + rows) h->scroll = h->sel - rows + 1;
@@ -391,17 +378,16 @@ void help_draw(Help *h, SDL_Renderer *ren, int W, int H)
         for (int i = h->scroll; i < h->scroll + rows && i < h->nshown; i++) {
             const AVFilter *f = h->filters[h->shown[i]];
             int ly = y + (i - h->scroll) * lh;
-            if (i == h->sel) fill(ren, (SDL_Rect){ box.x + 1, ly, box.w - 2, lh }, 255, 150, 30, 70);
+            if (i == h->sel) hud_fill(ren, (SDL_Rect){ body.x, ly, body.w, lh }, C_TITLE.r, C_TITLE.g, C_TITLE.b, 70);
             snprintf(line, sizeof line, "%-16.16s %s%s", f->name,
                      (f->flags & AVFILTER_FLAG_SUPPORT_TIMELINE) ? "T " : "  ",
                      f->description ? f->description : "");
             line[cols < (int)sizeof line - 1 ? cols : (int)sizeof line - 1] = 0;
             hud_text(hud, x, ly, i == h->sel ? C_TITLE : C_TEXT, line);
         }
-        hud_text(hud, x, box.y + box.h - pad - lh, C_DIM,
-                 "type to search   up/down   enter: options   esc: back to the picture");
+        hud_footer(hud, &body, "type to search   up/down   enter: options of the filter", "T = bypassable");
     } else {
-        int rows = (box.y + box.h - pad - lh - 4 - y) / lh;
+        int rows = body.h / lh;
         if (rows < 1) rows = 1;
         if (h->dscroll > h->nrows - rows) h->dscroll = h->nrows - rows;
         if (h->dscroll < 0) h->dscroll = 0;
@@ -416,8 +402,7 @@ void help_draw(Help *h, SDL_Renderer *ren, int W, int H)
             else if (strstr(r->line, " T ")) c = C_LIVE;
             hud_text(hud, x, ly, c, line);
         }
-        snprintf(line, sizeof line, "enter: insert  %s   left/backspace: list   esc: back to the picture", h->snippet);
-        line[cols < (int)sizeof line - 1 ? cols : (int)sizeof line - 1] = 0;
-        hud_text(hud, x, box.y + box.h - pad - lh, C_DIM, line);
+        snprintf(line, sizeof line, "enter: insert  %s", h->snippet);
+        hud_footer(hud, &body, line, "left/bksp: list");
     }
 }

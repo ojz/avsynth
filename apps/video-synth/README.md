@@ -37,7 +37,7 @@ $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
 ## Run
 
 ```
-vsynth [--project FILE] [--region X,Y,W,H] [--win X,Y,W,H] [--fps N] [--vf CHAIN] [--selftest] [--screenshot FILE.bmp]
+vsynth [--project FILE] [--region X,Y,W,H] [--win X,Y,W,H] [--fps N] [--vf CHAIN] [--selftest] [--screenshot FILE.bmp] [--shots DIR]
 ```
 
 The project file defaults to `default.vsynth` in the per-user app data folder
@@ -67,7 +67,7 @@ The window is borderless. Put it inside the capture region for feedback.
 
 ## Writing chains
 
-Press `e`. The editor is a plain text box over the video. Ctrl+Enter applies:
+Press `F3`. The editor is a plain text box over the video. Ctrl+Enter applies:
 the text is parsed into a throwaway graph first, and only if that succeeds is
 the running graph replaced. A parse error shows libavfilter's message in red
 under the text and the old picture keeps running. Esc closes.
@@ -101,28 +101,39 @@ knob that drives both.
 
 ## Modes
 
-The window is modal. One overlay at a time owns the keyboard; Esc always
-returns to the bare picture. The one exception is help, which is a detour: Esc
-there returns to wherever you opened it from, usually the editor. The mouse
-always belongs to the window: left-drag moves, right-drag resizes, in every
-mode, even over the editor or help.
+The window is modal. One sheet, drawn in the same place with the same header in
+every mode, and one mode at a time owns the keyboard. The header shows the
+F-key tabs with the active one highlighted, then chain, preset and fps; the
+footer shows the keys that matter in that mode.
 
-| Mode | Enter | What you see |
+| Mode | Key | What you see |
 |---|---|---|
-| **picture** | Esc from anywhere | just the video, plus a short notice now and then |
-| **panel** | `h` | knobs, presets, taps; the mouse works on the rows |
-| **edit** | `e` | the chain text; Ctrl+Enter applies |
+| **picture** | Esc | just the video, plus a short notice now and then |
 | **help** | `F1` (or Ctrl+`h`) | libavfilter's filter list and option tables |
+| **knobs** | `F2` (or `h`) | one row per knob, presets, taps; the mouse works on the rows |
+| **chain** | `F3` (or `e`) | the chain text; Ctrl+Enter applies |
+| **project** | `F4` | the chains in the project (switch, new, rename, delete), capture region and fps |
 
-`q` quits from picture and panel. In edit and help it is a letter.
+Esc returns to the picture; so does the F-key of the mode you are in. Help is
+a detour: Esc there returns to wherever you opened it from. `q` quits from
+picture and knobs; in the text modes it is a letter. The mouse always belongs
+to the window: left-drag moves, right-drag resizes, in every mode, even over
+the editor or help. Taps are visible in every mode that shows the picture.
 
-## Controls
-
-Picture and panel share these keys:
+Keys that work in every mode:
 
 | Key | Action |
 |---|---|
-| PageUp / PageDown | previous / next chain in the project |
+| `F1` `F2` `F3` `F4` | switch mode; the active mode's key returns to the picture |
+| PageUp / PageDown | previous / next chain in the project (unapplied edits are dropped) |
+| `F12` | save a screenshot of the window (picture plus overlays) as `shot-NNN.bmp` in the app data folder, or in `--shots DIR` |
+
+## Controls
+
+Picture and knobs share these keys:
+
+| Key | Action |
+|---|---|
 | Ctrl+`n` | new chain (a copy of the current one), opens the editor |
 | `c` | pick the capture region: desktop dims, current region shows in red; drag a new one, or Esc / right-click to keep it |
 | Tab / Shift+Tab | select next / previous control |
@@ -137,13 +148,15 @@ Picture and panel share these keys:
 | `f` | fullscreen toggle |
 | `q` | quit, saving geometry |
 
-Panel mouse: click a row to select, drag its bar to set, click the module name
-to bypass, wheel to nudge (Shift fine, Ctrl coarse).
+Knobs mouse: click a row to select, drag its bar to set, click the module name
+to bypass, wheel to nudge (Shift fine, Ctrl coarse). Enum options (blend
+modes, edge modes) show the constant's name and step through the constants.
 
-Edit: arrows, Home/End, Ctrl+Home/End, Shift-selection, Ctrl+A/C/X/V, Tab
-inserts two spaces, Ctrl+Enter applies, `F1` opens help on the word under the
-cursor. Unapplied edits survive leaving and re-entering the mode (the title
-shows `*`); switching chains discards them.
+Chain: arrows, Home/End, Ctrl+Home/End, Shift-selection, Ctrl+A/C/X/V, Tab
+inserts two spaces, Ctrl+Enter applies and leaves the cursor where it is,
+`F1` opens help on the filter under the cursor. Unapplied edits survive
+leaving and re-entering the mode (the footer says `modified`); switching
+chains drops them.
 
 Help: type to narrow the list (name matches first, then descriptions), Up/Down
 to move, Enter shows the filter's options: type, default, range, and a green
@@ -152,8 +165,13 @@ to move, Enter shows the filter's options: type, default, range, and a green
 at the cursor, so the new module arrives with knobs. Backspace or Left goes
 back to the list.
 
-The panel header shows chain name, preset slot, capture region and fps.
-stderr logs the same.
+Project: Up/Down over the capture row and the chains. On the capture row,
+Left/Right change the fps by 5 and Enter (or `c`) picks the region. On a
+chain, Enter switches to it, `n` adds a new chain (copy of the current one),
+`r` renames it (type, Enter), Delete pressed twice deletes it. The last chain
+cannot be deleted.
+
+The window title and stderr show the selected knob and its value.
 
 ## Starter chains
 

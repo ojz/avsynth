@@ -37,6 +37,8 @@ typedef struct KnobDef {
     char   opt2[32];      /* optional second option driven by the same value */
     char   fmt2[24];
     double min, max, neutral, step;
+    const void *cls;      /* AVClass of the filter; with unit, the knob is an enum */
+    const char *unit;     /* AVOption unit naming the constants, or NULL */
 } KnobDef;
 
 typedef struct ModuleDef {
@@ -102,6 +104,9 @@ void rack_randomize(Rack *r, Voice *v, double depth);
 
 /* One-line status for the selected control, e.g. "rot.angle = 0.031  [on]". */
 void rack_describe_selected(const Rack *r, char *buf, size_t cap);
+
+/* The knob's value for display: the constant's name for an enum, else the number. */
+void rack_format_value(const Rack *r, int module, int knob, char *buf, size_t cap);
 
 /* Lookups by module label / knob option; -1 when absent. */
 int  rack_find_module(const Rack *r, const char *label);

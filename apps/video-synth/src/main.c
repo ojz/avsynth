@@ -4,14 +4,26 @@
  * Screen region -> user-written libavfilter chain -> borderless window.
  * The chain is text (ffmpeg -filter_complex syntax) edited in an overlay;
  * knobs are derived from it. A project (SQLite) holds chains, each with ten
- * presets of knob values. The capture region is picked by dragging a
- * rectangle on a translucent overlay.
+ * presets of knob values.
  *
  *   vsynth [--project FILE] [--region X,Y,W,H] [--fps N] [--win X,Y,W,H]
  *          [--vf "chain"] [--selftest] [--screenshot FILE.bmp]
  *
  *   Geometry comes from the project file when present; CLI flags override it.
  *   --vf runs the given chain instead of the project's current one.
+ *
+ * The UI is modal. One sheet, same place in every mode, one mode at a time
+ * owns the keyboard:
+ *   MAIN     the picture, nothing drawn but transient notices
+ *   PANEL    knobs and presets            F2
+ *   EDIT     chain text                   F3
+ *   HELP     filter browser               F1
+ *   PROJECT  chains, capture, fps         F4
+ * Esc returns to MAIN (from HELP: to where help was opened). The F-key of
+ * the active mode also returns to MAIN. PageUp/PageDown switch chains in
+ * every mode. q quits from MAIN and PANEL only, since it is a letter in the
+ * others. The mouse always belongs to the window (drag, resize) except on
+ * the panel's rows.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,19 +39,7 @@
 #include "hud.h"
 #include "editor.h"
 #include "help.h"
-
-/* ---- app state, one instance ----
- *
- * The UI is modal. Exactly one overlay owns the keyboard:
- *   MAIN   the picture, nothing drawn but transient notices
- *   PANEL  knobs and presets (h)
- *   EDIT   chain text (e)
- *   HELP   filter browser (F1)
- * Esc always returns to MAIN. q quits from MAIN and PANEL only, since it is a
- * letter in the other two. The mouse always belongs to the window (drag,
- * resize) except on the panel's rows. */
-
-enum Mode { MODE_MAIN, MODE_PANEL, MODE_EDIT, MODE_HELP };
+#include "options.h"
 
 typedef struct App {
     VoiceConfig cfg;
@@ -48,6 +48,7 @@ typedef struct App {
     Hud     *hud;
     Editor  *ed;
     Help    *help;
+    Options *opt;
     Voice   *voice;
     Rack     rack;
     enum Mode mode;
@@ -57,7 +58,24 @@ typedef struct App {
     char  chain_name[64];
     char  chain_text[RACK_CHAIN_CAP];
     int   preset_slot;   /* last loaded/saved slot, for the title */
+
+    char  shots_dir[1024];   /* F12 screenshots go here */
+    int   shot_n;
 } App;
+
+/* F12: save the window (picture plus overlays) as shot-NNN.bmp. */
+static void take_screenshot(App *a)
+{
+    char path[1200];
+    snprintf(path, sizeof path, "%sshot-%03d.bmp", a->shots_dir, ++a->shot_n);
+    if (window_save_bmp(a->win, path) == 0) {
+        char msg[1300];
+        snprintf(msg, sizeof msg, "saved %s", path);
+        hud_notice(a->hud, msg);
+    } else {
+        hud_notice(a->hud, "screenshot failed");
+    }
+}
 
 static int parse_rect(const char *s, int *x, int *y, int *w, int *h)
 {
@@ -69,9 +87,9 @@ static void show_status(App *a)
     char buf[256], title[320];
     rack_describe_selected(&a->rack, buf, sizeof buf);
     if (a->preset_slot > 0)
-        snprintf(title, sizeof title, "%s P%d  %s", a->chain_name, a->preset_slot, buf);
+        snprintf(title, sizeof title, "%.60s P%d  %s", a->chain_name, a->preset_slot, buf);
     else
-        snprintf(title, sizeof title, "%s  %s", a->chain_name, buf);
+        snprintf(title, sizeof title, "%.60s  %s", a->chain_name, buf);
     window_set_title(a->win, title);
     fprintf(stderr, "%s\n", title);
 }
@@ -86,22 +104,42 @@ static void notice(App *a, const char *msg)
 static void overlay(SDL_Renderer *ren, int w, int h, void *ud)
 {
     App *a = ud;
-    hud_draw(ren, w, h, a->hud);
     editor_draw(a->ed, ren, w, h);
     help_draw(a->help, ren, w, h);
+    options_draw(a->opt, ren, w, h);
+    hud_draw(a->hud, ren, w, h);   /* last: taps and notices sit on top of any sheet */
+}
+
+/* Push what the project mode and the sheet header show. */
+static void refresh_project_view(App *a)
+{
+    ChainInfo list[OPT_MAX_CHAINS];
+    int counts[OPT_MAX_CHAINS];
+    int n = project_chain_list(a->proj, list, OPT_MAX_CHAINS);
+    if (n < 0) n = 0;
+    int index = 0;
+    for (int i = 0; i < n; i++) {
+        counts[i] = project_preset_count(a->proj, list[i].id);
+        if (list[i].id == a->chain_id) index = i + 1;
+    }
+    options_set_chains(a->opt, list, counts, n, a->chain_id);
+    options_set_capture(a->opt, a->cfg.cap_x, a->cfg.cap_y, a->cfg.cap_w, a->cfg.cap_h, a->cfg.cap_fps);
+    hud_set_chain(a->hud, a->chain_name, index, n);
 }
 
 static void set_mode(App *a, enum Mode m)
 {
     if (a->mode == MODE_EDIT && m != MODE_EDIT) editor_close(a->ed);
     if (a->mode == MODE_HELP && m != MODE_HELP) help_close(a->help);
+    if (a->mode == MODE_PROJECT && m != MODE_PROJECT) options_close(a->opt);
     a->mode = m;
-    hud_set_visible(a->hud, m == MODE_PANEL);
+    hud_set_mode(a->hud, m);
     if (m == MODE_EDIT && !editor_is_open(a->ed)) editor_open(a->ed, a->chain_text, a->chain_name);
-    if (m == MODE_MAIN) hud_notice(a->hud, "h panel  e edit  F1 help  q quit");
+    if (m == MODE_PROJECT) { refresh_project_view(a); options_open(a->opt); }
+    if (m == MODE_MAIN) hud_notice(a->hud, "F1 help  F2 knobs  F3 chain  F4 project  q quit");
 }
 
-/* Help opened from the editor starts on the word under the cursor. */
+/* Help opened from the editor starts on the filter under the cursor. */
 static void open_help(App *a)
 {
     char word[64] = "";
@@ -237,23 +275,26 @@ static int switch_chain(App *a, int id)
     editor_load(a->ed, text, name);
     a->preset_slot = 0;
     project_set_current_chain(a->proj, id);
-    hud_set_chain_name(a->hud, name);
     hud_set_patch(a->hud, 0);
     if (project_load_preset(a->proj, id, 1, &a->rack) == 0) { a->preset_slot = 1; hud_set_patch(a->hud, 1); }
-    return restart_voice(a);
+    int rc = restart_voice(a);
+    refresh_project_view(a);
+    return rc;
 }
 
 static void step_chain(App *a, int dir)
 {
-    ChainInfo list[64];
-    int n = project_chain_list(a->proj, list, 64);
-    if (n <= 1) { notice(a, "only one chain (ctrl+n adds one)"); return; }
+    ChainInfo list[OPT_MAX_CHAINS];
+    int n = project_chain_list(a->proj, list, OPT_MAX_CHAINS);
+    if (n <= 1) { notice(a, "only one chain (F4, n adds one)"); return; }
     int cur = 0;
     for (int i = 0; i < n; i++) if (list[i].id == a->chain_id) cur = i;
     int next = (cur + dir + n) % n;
+    int dropped = a->mode == MODE_EDIT && editor_dirty(a->ed);
     if (switch_chain(a, list[next].id) == 0) {
         char msg[128];
-        snprintf(msg, sizeof msg, "chain %d/%d: %s", next + 1, n, a->chain_name);
+        snprintf(msg, sizeof msg, "chain %d/%d: %s%s", next + 1, n, a->chain_name,
+                 dropped ? "  (unapplied edits dropped)" : "");
         notice(a, msg);
     }
 }
@@ -266,8 +307,22 @@ static void new_chain(App *a)
     if (id <= 0) { notice(a, "could not add chain"); return; }
     if (switch_chain(a, id) == 0) {
         set_mode(a, MODE_EDIT);
-        editor_set_status(a->ed, "new chain, a copy of the previous one", 0);
+        editor_set_status(a->ed, "new chain, a copy of the previous one; F4 renames it", 0);
     }
+}
+
+static void delete_chain(App *a, int id)
+{
+    ChainInfo list[OPT_MAX_CHAINS];
+    int n = project_chain_list(a->proj, list, OPT_MAX_CHAINS);
+    if (n <= 1) { notice(a, "cannot delete the last chain"); return; }
+    if (project_chain_delete(a->proj, id) < 0) { notice(a, "delete failed"); return; }
+    if (id == a->chain_id) {
+        n = project_chain_list(a->proj, list, OPT_MAX_CHAINS);
+        if (n > 0) switch_chain(a, list[0].id);
+    }
+    refresh_project_view(a);
+    notice(a, "chain deleted");
 }
 
 /* Editor said apply: validate, and only then swap racks and restart. */
@@ -287,17 +342,34 @@ static void apply_editor(App *a)
     a->preset_slot = 0;
     hud_set_patch(a->hud, 0);
     if (restart_voice(a) < 0) { editor_set_status(a->ed, "voice failed to start", 1); return; }
-    /* mark the buffer clean without moving the cursor */
-    {
-        char saved[RACK_CHAIN_CAP];
-        snprintf(saved, sizeof saved, "%s", text);
-        editor_load(a->ed, saved, a->chain_name);
-    }
+    editor_mark_clean(a->ed);
     char msg[160];
     snprintf(msg, sizeof msg, "applied: %d modules, %d controls, %d tap%s",
              a->rack.nmods, a->rack.ncontrols, a->rack.ntaps, a->rack.ntaps == 1 ? "" : "s");
     editor_set_status(a->ed, msg, 0);
     show_status(a);
+}
+
+/* Region picker, then re-derive so {W}/{H} follow, keeping knob positions. */
+static void pick_region(App *a)
+{
+    PickRect prev = { a->cfg.cap_x, a->cfg.cap_y, a->cfg.cap_w, a->cfg.cap_h }, next;
+    if (!picker_run(&prev, &next)) { notice(a, "capture region unchanged"); return; }
+    a->cfg.cap_x = next.x; a->cfg.cap_y = next.y;
+    a->cfg.cap_w = next.w; a->cfg.cap_h = next.h;
+    char err[GRAPH_ERR_CAP];
+    Rack r;
+    if (rack_from_chain(&r, a->rack.chain, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) == 0) {
+        memcpy(r.values, a->rack.values, sizeof r.values);
+        memcpy(r.enabled, a->rack.enabled, sizeof r.enabled);
+        r.sel = a->rack.sel;
+        a->rack = r;
+    }
+    restart_voice(a);
+    refresh_project_view(a);
+    char msg[128];
+    snprintf(msg, sizeof msg, "capture %d,%d %dx%d", a->cfg.cap_x, a->cfg.cap_y, a->cfg.cap_w, a->cfg.cap_h);
+    notice(a, msg);
 }
 
 /* Digit row by physical position, so it works on AZERTY where the digits
@@ -307,6 +379,33 @@ static int slot_for_scancode(SDL_Scancode s)
     if (s >= SDL_SCANCODE_1 && s <= SDL_SCANCODE_9) return (int)(s - SDL_SCANCODE_1) + 1;
     if (s == SDL_SCANCODE_0) return 10;
     return 0;
+}
+
+static void preset_key(App *a, int slot, int save)
+{
+    char msg[128];
+    if (save) {
+        snprintf(msg, sizeof msg, "preset %d", slot);
+        if (project_save_preset(a->proj, a->chain_id, slot, msg, &a->rack) == 0) {
+            a->preset_slot = slot;
+            snprintf(msg, sizeof msg, "saved preset %d", slot);
+        } else {
+            snprintf(msg, sizeof msg, "save to slot %d FAILED", slot);
+        }
+    } else {
+        int rc = project_load_preset(a->proj, a->chain_id, slot, &a->rack);
+        if (rc == 0) {
+            rack_send_all(&a->rack, a->voice);
+            a->preset_slot = slot;
+            snprintf(msg, sizeof msg, "loaded preset %d", slot);
+        } else if (rc == 1) {
+            snprintf(msg, sizeof msg, "slot %d is empty (shift+%d saves)", slot, slot % 10);
+        } else {
+            snprintf(msg, sizeof msg, "load slot %d FAILED", slot);
+        }
+    }
+    hud_set_patch(a->hud, a->preset_slot);
+    notice(a, msg);
 }
 
 static void default_project_path(char *buf, size_t cap)
@@ -328,7 +427,6 @@ static int selftest(App *a)
     char err[GRAPH_ERR_CAP];
     Rack r;
 
-    /* the default chain derives a rack with the knobs we expect */
     if (rack_from_chain(&r, RACK_DEFAULT_CHAIN, 640, 480, err, sizeof err) < 0) {
         fprintf(stderr, "selftest: default chain FAILED: %s\n", err); fails++;
     } else {
@@ -337,8 +435,12 @@ static int selftest(App *a)
             Control c = r.controls[i];
             const ModuleDef *md = &r.mods[c.module];
             if (c.knob < 0) fprintf(stderr, "  %-8s bypass\n", md->label);
-            else fprintf(stderr, "  %-8s %-12s %g [%g..%g] step %g\n", md->label, md->knobs[c.knob].label,
-                         md->knobs[c.knob].neutral, md->knobs[c.knob].min, md->knobs[c.knob].max, md->knobs[c.knob].step);
+            else {
+                char val[48];
+                rack_format_value(&r, c.module, c.knob, val, sizeof val);
+                fprintf(stderr, "  %-8s %-12s %s [%g..%g] step %g\n", md->label, md->knobs[c.knob].label,
+                        val, md->knobs[c.knob].min, md->knobs[c.knob].max, md->knobs[c.knob].step);
+            }
         }
         int m = rack_find_module(&r, "zoom");
         if (m < 0 || rack_find_knob(&r, m, "w") < 0) { fprintf(stderr, "selftest: zoom knob missing FAILED\n"); fails++; }
@@ -346,16 +448,20 @@ static int selftest(App *a)
         if (m < 0 || rack_find_knob(&r, m, "angle") < 0) { fprintf(stderr, "selftest: rot.angle missing FAILED\n"); fails++; }
         m = rack_find_module(&r, "mix");
         if (m < 0 || r.enabled[m] != 0) { fprintf(stderr, "selftest: mix should start bypassed FAILED\n"); fails++; }
+        m = rack_find_module(&r, "diff");
+        int k = rack_find_knob(&r, m, "all_mode");
+        char val[48] = "";
+        if (m >= 0 && k >= 0) rack_format_value(&r, m, k, val, sizeof val);
+        if (strcmp(val, "difference")) { fprintf(stderr, "selftest: enum name FAILED (got '%s')\n", val); fails++; }
+        else fprintf(stderr, "selftest: enum knob shows '%s' OK\n", val);
     }
 
-    /* a broken chain is rejected with a reason */
     if (rack_from_chain(&r, "hue=h=0,nosuchfilter=1", 640, 480, err, sizeof err) == 0) {
         fprintf(stderr, "selftest: broken chain accepted FAILED\n"); fails++;
     } else {
         fprintf(stderr, "selftest: broken chain rejected: %s\n", err);
     }
 
-    /* an open output becomes a tap */
     if (rack_from_chain(&r, CHAIN_KALEIDO, 640, 480, err, sizeof err) < 0 || r.ntaps != 1) {
         fprintf(stderr, "selftest: kaleido tap FAILED (%s)\n", err); fails++;
     } else {
@@ -394,7 +500,18 @@ static int selftest(App *a)
         if (!ok) fails++;
     }
 
-    /* restart on a different region */
+    /* chain rename / delete round trip */
+    {
+        int id = project_chain_add(a->proj, "tmp", "negate");
+        char name[64];
+        if (id <= 0 || project_chain_rename(a->proj, id, "renamed") < 0 ||
+            project_chain_get(a->proj, id, name, sizeof name, NULL, 0) < 0 || strcmp(name, "renamed") ||
+            project_chain_delete(a->proj, id) < 0 || project_chain_get(a->proj, id, name, sizeof name, NULL, 0) == 0) {
+            fprintf(stderr, "selftest: chain rename/delete FAILED\n"); fails++;
+        } else fprintf(stderr, "selftest: chain rename/delete OK\n");
+        refresh_project_view(a);
+    }
+
     a->cfg.cap_w = 640; a->cfg.cap_h = 480;
     if (rack_from_chain(&r, a->rack.chain, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) == 0) a->rack = r;
     if (restart_voice(a) < 0) { fprintf(stderr, "selftest: restart FAILED\n"); fails++; }
@@ -420,6 +537,12 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) { do_selftest = 1; continue; }
         if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) { screenshot = argv[++i]; continue; }
+        if (!strcmp(argv[i], "--shots") && i + 1 < argc) {
+            snprintf(a.shots_dir, sizeof a.shots_dir, "%s", argv[++i]);
+            size_t n = strlen(a.shots_dir);
+            if (n && a.shots_dir[n - 1] != '\\' && a.shots_dir[n - 1] != '/') snprintf(a.shots_dir + n, sizeof a.shots_dir - n, "/");
+            continue;
+        }
         if (!strcmp(argv[i], "--project") && i + 1 < argc) {
             project_file = argv[++i];
         } else if (!strcmp(argv[i], "--region") && i + 1 < argc) {
@@ -436,13 +559,18 @@ int main(int argc, char **argv)
         } else {
         usage:
             fprintf(stderr, "usage: %s [--project FILE] [--region X,Y,W,H] [--win X,Y,W,H] "
-                            "[--fps N] [--vf CHAIN] [--selftest] [--screenshot FILE.bmp]\n", argv[0]);
+                            "[--fps N] [--vf CHAIN] [--selftest] [--screenshot FILE.bmp] [--shots DIR]\n", argv[0]);
             return 2;
         }
     }
 
     static char path[1024];
     if (!project_file) { default_project_path(path, sizeof path); project_file = path; }
+    if (!a.shots_dir[0]) {
+        char *pref = SDL_GetPrefPath("", "vsynth");
+        snprintf(a.shots_dir, sizeof a.shots_dir, "%s", pref ? pref : "");
+        if (pref) SDL_free(pref);
+    }
 
     a.proj = project_open(project_file);
     if (!a.proj) return 1;
@@ -460,17 +588,19 @@ int main(int argc, char **argv)
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_StopTextInput();   /* SDL turns it on by default; the editor turns it on when open */
+    SDL_StopTextInput();   /* SDL turns it on by default; text modes turn it on when open */
 
     a.win = window_create("vsynth", win_x, win_y, win_w, win_h);
     if (!a.win) return 1;
     a.hud = hud_create(window_renderer(a.win), &a.rack);
     if (!a.hud) return 1;
     a.ed = editor_create(a.hud);
-    if (!a.ed) return 1;
     a.help = help_create(a.hud);
-    if (!a.help) return 1;
+    a.opt = options_create(a.hud);
+    if (!a.ed || !a.help || !a.opt) return 1;
+    options_set_project(a.opt, project_file);
     a.mode = MODE_PANEL;
+    hud_set_mode(a.hud, MODE_PANEL);
     window_set_overlay(a.win, overlay, &a);
 
     if (project_chain_count(a.proj) == 0) seed_project(&a);
@@ -485,8 +615,9 @@ int main(int argc, char **argv)
         snprintf(a.chain_name, sizeof a.chain_name, "--vf");
         snprintf(a.chain_text, sizeof a.chain_text, "%s", raw_vf);
         a.chain_id = project_current_chain(a.proj);
-        hud_set_chain_name(a.hud, a.chain_name);
+        editor_load(a.ed, raw_vf, a.chain_name);
         if (restart_voice(&a) < 0) return 1;
+        refresh_project_view(&a);
     } else {
         int id = project_current_chain(a.proj);
         if (id <= 0) {
@@ -502,19 +633,18 @@ int main(int argc, char **argv)
             }
             snprintf(a.chain_name, sizeof a.chain_name, "built-in");
             snprintf(a.chain_text, sizeof a.chain_text, "%s", RACK_DEFAULT_CHAIN);
-            hud_set_chain_name(a.hud, a.chain_name);
+            editor_load(a.ed, RACK_DEFAULT_CHAIN, a.chain_name);
             if (restart_voice(&a) < 0) return 1;
+            refresh_project_view(&a);
         }
     }
 
     fprintf(stderr,
         "vsynth: capture %d,%d %dx%d @%dfps, chain '%s'\n"
         "  mouse: left-drag move, right-drag resize; panel: click row, drag bar, wheel nudges\n"
-        "  tab/shift+tab select knob, up/down nudge (shift fine, ctrl coarse)\n"
-        "  space bypass module, backspace reset knob, r reset all, x randomize (X wild)\n"
-        "  1-9,0 load preset, shift+1-9,0 save preset\n"
-        "  modes: h panel, e edit chain (ctrl+enter applies), F1 help, esc back to the picture\n"
-        "  pgup/pgdn switch chain, ctrl+n new chain\n"
+        "  F1 help  F2 knobs  F3 chain editor (ctrl+enter applies)  F4 project  esc: picture\n"
+        "  pgup/pgdn switch chain; knobs: tab, arrows (shift fine, ctrl coarse), space bypass,\n"
+        "  bksp reset, r reset all, x random (X wild), 1-0 load preset, shift+1-0 save\n"
         "  c pick capture region, f fullscreen, q quit\n",
         a.cfg.cap_x, a.cfg.cap_y, a.cfg.cap_w, a.cfg.cap_h, a.cfg.cap_fps, a.chain_name);
     show_status(&a);
@@ -532,11 +662,24 @@ int main(int argc, char **argv)
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) { running = 0; break; }
 
-            /* F1 (or ctrl+h) opens help from every mode */
-            if (ev.type == SDL_KEYDOWN && (ev.key.keysym.sym == SDLK_F1 ||
-                (ev.key.keysym.sym == SDLK_h && (SDL_GetModState() & KMOD_CTRL)))) {
-                if (a.mode == MODE_HELP) set_mode(&a, a.help_from); else open_help(&a);
-                continue;
+            /* keys that work in every mode: the F-key tabs and chain switching */
+            if (ev.type == SDL_KEYDOWN) {
+                SDL_Keycode k = ev.key.keysym.sym;
+                int ctrl = (SDL_GetModState() & KMOD_CTRL) != 0;
+                enum Mode tab = MODE_MAIN;
+                if (k == SDLK_F1 || (k == SDLK_h && ctrl)) tab = MODE_HELP;
+                else if (k == SDLK_F2) tab = MODE_PANEL;
+                else if (k == SDLK_F3) tab = MODE_EDIT;
+                else if (k == SDLK_F4) tab = MODE_PROJECT;
+                if (tab != MODE_MAIN) {
+                    if (a.mode == tab) set_mode(&a, tab == MODE_HELP ? a.help_from : MODE_MAIN);
+                    else if (tab == MODE_HELP) open_help(&a);
+                    else set_mode(&a, tab);
+                    continue;
+                }
+                if (k == SDLK_PAGEUP)   { step_chain(&a, -1); continue; }
+                if (k == SDLK_PAGEDOWN) { step_chain(&a, +1); continue; }
+                if (k == SDLK_F12)      { take_screenshot(&a); continue; }
             }
 
             /* the active overlay owns the keyboard; the mouse falls through to the window */
@@ -555,6 +698,32 @@ int main(int argc, char **argv)
                     continue;
                 }
                 if (act == HELP_CONSUMED) continue;
+            } else if (a.mode == MODE_PROJECT) {
+                OptResult res;
+                int act = options_handle_event(a.opt, &ev, &res);
+                switch (act) {
+                case OPT_CLOSE:        set_mode(&a, MODE_MAIN); break;
+                case OPT_SWITCH_CHAIN: if (switch_chain(&a, res.chain_id) == 0) notice(&a, a.chain_name); break;
+                case OPT_NEW_CHAIN:    new_chain(&a); break;
+                case OPT_RENAME_CHAIN:
+                    project_chain_rename(a.proj, res.chain_id, res.name);
+                    if (res.chain_id == a.chain_id) {
+                        snprintf(a.chain_name, sizeof a.chain_name, "%s", res.name);
+                        editor_load(a.ed, a.chain_text, a.chain_name);
+                    }
+                    refresh_project_view(&a);
+                    notice(&a, "renamed");
+                    break;
+                case OPT_DELETE_CHAIN: delete_chain(&a, res.chain_id); break;
+                case OPT_SET_FPS:
+                    a.cfg.cap_fps = res.fps;
+                    restart_voice(&a);
+                    refresh_project_view(&a);
+                    break;
+                case OPT_PICK_REGION:  pick_region(&a); break;
+                default: break;
+                }
+                if (act != OPT_NONE) continue;
             } else if (a.mode == MODE_PANEL) {
                 if (hud_handle_event(a.hud, &ev, &a.rack, a.voice)) {
                     if (ev.type != SDL_MOUSEMOTION) show_status(&a);
@@ -570,32 +739,7 @@ int main(int argc, char **argv)
             double factor = (mod & KMOD_SHIFT) ? 0.1 : (mod & KMOD_CTRL) ? 10.0 : 1.0;
             SDL_Keycode key = ev.key.keysym.sym;
             int slot = slot_for_scancode(ev.key.keysym.scancode);
-            if (slot) {
-                char msg[128];
-                if (mod & KMOD_SHIFT) {
-                    snprintf(msg, sizeof msg, "preset %d", slot);
-                    if (project_save_preset(a.proj, a.chain_id, slot, msg, &a.rack) == 0) {
-                        a.preset_slot = slot;
-                        snprintf(msg, sizeof msg, "saved preset %d", slot);
-                    } else {
-                        snprintf(msg, sizeof msg, "save to slot %d FAILED", slot);
-                    }
-                } else {
-                    int rc = project_load_preset(a.proj, a.chain_id, slot, &a.rack);
-                    if (rc == 0) {
-                        rack_send_all(&a.rack, a.voice);
-                        a.preset_slot = slot;
-                        snprintf(msg, sizeof msg, "loaded preset %d", slot);
-                    } else if (rc == 1) {
-                        snprintf(msg, sizeof msg, "slot %d is empty (shift+%d saves)", slot, slot % 10);
-                    } else {
-                        snprintf(msg, sizeof msg, "load slot %d FAILED", slot);
-                    }
-                }
-                hud_set_patch(a.hud, a.preset_slot);
-                notice(&a, msg);
-                continue;
-            }
+            if (slot) { preset_key(&a, slot, (mod & KMOD_SHIFT) != 0); continue; }
             switch (key) {
             case SDLK_ESCAPE:
                 set_mode(&a, MODE_MAIN);
@@ -611,12 +755,6 @@ int main(int argc, char **argv)
                 break;
             case SDLK_e:
                 set_mode(&a, MODE_EDIT);
-                break;
-            case SDLK_PAGEUP:
-                step_chain(&a, -1);
-                break;
-            case SDLK_PAGEDOWN:
-                step_chain(&a, +1);
                 break;
             case SDLK_n:
                 if (mod & KMOD_CTRL) new_chain(&a);
@@ -657,29 +795,9 @@ int main(int argc, char **argv)
                 notice(&a, wild ? "randomized (wild)" : "randomized");
                 break;
             }
-            case SDLK_c: {
-                PickRect prev = { a.cfg.cap_x, a.cfg.cap_y, a.cfg.cap_w, a.cfg.cap_h }, next;
-                if (picker_run(&prev, &next)) {
-                    a.cfg.cap_x = next.x; a.cfg.cap_y = next.y;
-                    a.cfg.cap_w = next.w; a.cfg.cap_h = next.h;
-                    /* re-derive: {W}/{H} and any expression defaults depend on the size */
-                    char err[GRAPH_ERR_CAP];
-                    Rack r;
-                    if (rack_from_chain(&r, a.rack.chain, a.cfg.cap_w, a.cfg.cap_h, err, sizeof err) == 0) {
-                        memcpy(r.values, a.rack.values, sizeof r.values);
-                        memcpy(r.enabled, a.rack.enabled, sizeof r.enabled);
-                        r.sel = a.rack.sel;
-                        a.rack = r;
-                    }
-                    if (restart_voice(&a) < 0) { running = 0; break; }
-                    char msg[128];
-                    snprintf(msg, sizeof msg, "capture %d,%d %dx%d", a.cfg.cap_x, a.cfg.cap_y, a.cfg.cap_w, a.cfg.cap_h);
-                    notice(&a, msg);
-                } else {
-                    notice(&a, "capture region unchanged");
-                }
+            case SDLK_c:
+                pick_region(&a);
                 break;
-            }
             default:
                 break;
             }
@@ -716,7 +834,6 @@ int main(int argc, char **argv)
                 if (now - fps_t0 >= 2000) {
                     double fps = frames * 1000.0 / (now - fps_t0);
                     hud_set_fps(a.hud, fps);
-                    fprintf(stderr, "fps: %.1f\n", fps);
                     frames = 0;
                     fps_t0 = now;
                 }
@@ -735,6 +852,7 @@ int main(int argc, char **argv)
             out.cap_x, out.cap_y, out.cap_w, out.cap_h, out.win_x, out.win_y, out.win_w, out.win_h);
 
     voice_stop(a.voice);
+    options_destroy(a.opt);
     help_destroy(a.help);
     editor_destroy(a.ed);
     hud_destroy(a.hud);

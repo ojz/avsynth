@@ -51,24 +51,28 @@ public class W32 {
 "@
 [void][W32]::SetProcessDPIAware()
 $script:hwnd = [IntPtr]::Zero
+# F12 makes the app save its own frame buffer (shot-NNN.bmp in --shots), so
+# windows sitting on top of it do not matter. Converted to PNG with ffmpeg.
+$script:shot_n = 0
 function Shot($name) {
-  $r = New-Object W32+RECT
-  [void][W32]::GetWindowRect($script:hwnd, [ref]$r)
-  $w = $r.R - $r.L; $h = $r.B - $r.T
-  $bmp = New-Object System.Drawing.Bitmap $w, $h
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
-  $bmp.Save("$sp\$name.png")
-  $g.Dispose(); $bmp.Dispose()
-  "shot $name ${w}x${h}"
+  $script:shot_n++
+  [W32]::KeyDown($script:hwnd, 0x7B); Start-Sleep -Milliseconds 40; [W32]::KeyUp($script:hwnd, 0x7B)
+  Start-Sleep -Milliseconds 400
+  $bmp = "$sp\shot-{0:D3}.bmp" -f $script:shot_n
+  if (Test-Path $bmp) {
+    & ffmpeg -y -loglevel error -i $bmp "$sp\$name.png"
+    Remove-Item $bmp
+    "shot $name"
+  } else { "shot $name MISSING ($bmp)" }
 }
 function Tap($vk) { [W32]::KeyDown($script:hwnd, $vk); Start-Sleep -Milliseconds 40; [W32]::KeyUp($script:hwnd, $vk); Start-Sleep -Milliseconds 80 }
 function Chord($mod, $vk) { [W32]::KeyDown($script:hwnd, $mod); Start-Sleep -Milliseconds 40; Tap $vk; [W32]::KeyUp($script:hwnd, $mod); Start-Sleep -Milliseconds 80 }
 function TypeText($s) { foreach ($c in $s.ToCharArray()) { [W32]::Char($script:hwnd, $c); Start-Sleep -Milliseconds 15 } }
-$VK = @{ PGDN = 0x22; E = 0x45; H = 0x48; Q = 0x51; RETURN = 0x0D; CONTROL = 0x11; END = 0x23; ESC = 0x1B; TAB = 0x09; UP = 0x26; F1 = 0x70 }
+$VK = @{ PGDN = 0x22; E = 0x45; H = 0x48; Q = 0x51; RETURN = 0x0D; CONTROL = 0x11; END = 0x23; ESC = 0x1B; TAB = 0x09; UP = 0x26; F1 = 0x70; F2 = 0x71; F3 = 0x72; F4 = 0x73 }
 
 Remove-Item "$sp\drive.vsynth" -ErrorAction SilentlyContinue
-$p = Start-Process -FilePath $Exe -ArgumentList "--project","$sp\drive.vsynth","--region","100,100,640,480","--win","900,200,640,480" -RedirectStandardError "$sp\drive.log" -PassThru -NoNewWindow
+Remove-Item "$sp\shot-*.bmp" -ErrorAction SilentlyContinue
+$p = Start-Process -FilePath $Exe -ArgumentList "--project","$sp\drive.vsynth","--shots","$sp","--region","100,100,640,480","--win","900,200,640,480" -RedirectStandardError "$sp\drive.log" -PassThru -NoNewWindow
 Start-Sleep -Seconds 3
 $script:hwnd = [W32]::Find([uint32]$p.Id)
 "hwnd $($script:hwnd)"
@@ -78,9 +82,12 @@ Tap $VK.ESC; Start-Sleep -Milliseconds 500
 Shot "main"
 Tap $VK.PGDN; Start-Sleep -Seconds 2
 Tap $VK.PGDN; Start-Sleep -Seconds 3            # kaleido, has a tap
-Tap $VK.H; Start-Sleep -Milliseconds 500
+Tap $VK.F2; Start-Sleep -Milliseconds 500
 Shot "kaleido"
-Tap $VK.E; Start-Sleep -Seconds 1
+Tap $VK.F4; Start-Sleep -Milliseconds 500
+Shot "project"
+Tap $VK.F4; Start-Sleep -Milliseconds 300
+Tap $VK.F3; Start-Sleep -Seconds 1
 Shot "editor"
 Tap $VK.F1; Start-Sleep -Milliseconds 500
 TypeText "hue"; Start-Sleep -Milliseconds 500
@@ -96,7 +103,8 @@ TypeText ",bogus=1"
 Chord $VK.CONTROL $VK.RETURN; Start-Sleep -Seconds 2
 Shot "error"
 Tap $VK.ESC; Start-Sleep -Milliseconds 500      # back to the picture; the editor keeps the bad text
-Tap $VK.E; Start-Sleep -Milliseconds 500
+Shot "main-after"
+Tap $VK.F3; Start-Sleep -Milliseconds 500
 Shot "editor-dirty"
 Tap $VK.ESC; Start-Sleep -Milliseconds 500
 Tap $VK.Q; Start-Sleep -Seconds 2

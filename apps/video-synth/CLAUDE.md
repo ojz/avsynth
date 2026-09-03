@@ -52,11 +52,13 @@ running it: the window pops up on their desktop.
   `project.c` SQLite (chain / preset / preset_value / preset_enable). Changing the capture region or
   applying chain text restarts the voice (`restart_voice` in main.c) and resends all knobs; a knob
   change never does.
-- The UI is modal (`enum Mode` in main.c: MAIN, PANEL, EDIT, HELP). One overlay owns the keyboard;
-  Esc always goes to MAIN (from HELP: back to where it was opened); `q` quits only from MAIN/PANEL;
-  F1 opens help from anywhere. The mouse
-  always falls through to the window for drag/resize except on panel rows with the left button.
-  Add new views as modes, not as ad-hoc toggles.
+- The UI is modal (`enum Mode` in hud.h: MAIN, PANEL F2, EDIT F3, HELP F1, PROJECT F4). Every mode
+  draws inside the shared sheet from `hud_sheet()` (same frame, header with F-key tabs and
+  chain/preset/fps, footer via `hud_footer()`); `options.c` is the project mode. One overlay owns
+  the keyboard; Esc goes to MAIN (from HELP: back to where it was opened); the active mode's F-key
+  also goes to MAIN; PgUp/PgDn and F12 (screenshot) work in every mode; `q` quits only from
+  MAIN/PANEL. The mouse always falls through to the window for drag/resize except on panel rows
+  with the left button. Add new views as modes on the next F-key, drawn in the sheet.
 - A knob exists only for an option the user wrote in the chain text whose value is a plain number
   and whose AVOption carries `AV_OPT_FLAG_RUNTIME_PARAM`. Bypass exists for filters with
   `AVFILTER_FLAG_SUPPORT_TIMELINE`. Do not add hand-written module tables; add an `OVERRIDES` row
