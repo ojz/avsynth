@@ -62,7 +62,7 @@ The window is borderless. Put it inside the capture region for feedback.
 | **module** | One filter instance in the chain. Named with `filter@name`; unnamed ones get libavfilter's `Parsed_filter_N`. |
 | **knob** | A numeric option you wrote in the chain that the filter accepts at runtime. |
 | **preset** | A snapshot of every knob value and bypass flag of a chain, in a slot 1 to 10. |
-| **tap** | An output label you leave unconnected. Shown as a thumbnail in the corner. |
+| **tap** | An output label you leave unconnected. Shown as a thumbnail: bottom-right on the bare picture, top-right of the sheet in knobs and chain mode. |
 | **project** | One SQLite file holding chains, their presets, and the last geometry. |
 
 ## Writing chains

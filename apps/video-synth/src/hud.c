@@ -53,7 +53,8 @@ struct Hud {
     Uint32 notice_until;
 
     /* layout from the last draw, for hit testing */
-    SDL_Rect panel;
+    SDL_Rect panel;        /* the sheet */
+    int      body_top;
     Row      rows[RACK_MAX_CONTROLS];
     int      nrows;
     int      scroll;       /* first control row shown */
@@ -284,9 +285,9 @@ SDL_Rect hud_sheet(Hud *h, SDL_Renderer *ren, int W, int H)
     hud_fill(ren, (SDL_Rect){ sheet.x + PAD, y, sheet.w - PAD * 2, 1 }, 255, 255, 255, 60);
     y += 4;
 
-    /* notice replaces the first body line for a moment */
     SDL_Rect body = { sheet.x + PAD, y, sheet.w - PAD * 2, sheet.y + sheet.h - PAD - rowh - 6 - y };
     h->panel = sheet;
+    h->body_top = y;
     return body;
 }
 
@@ -312,16 +313,19 @@ void hud_footer(Hud *h, const SDL_Rect *body, const char *left, const char *righ
 
 /* ---------- drawing ---------- */
 
-static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H)
+/* Bottom-right of the picture; with a sheet up, top-right of its body, where
+ * the rows never reach and the footer stays readable. */
+static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H, int in_sheet)
 {
     if (h->ntaps <= 0) return;
     int th = H / 5;
     if (th < 60) th = 60;
-    int tx = W - 8;
+    int tx = in_sheet ? h->panel.x + h->panel.w - PAD : W - 8;
+    int ty = in_sheet ? h->body_top : H - 8 - th;
     for (int i = h->ntaps - 1; i >= 0; i--) {
         int tw = h->tap_h[i] > 0 ? th * h->tap_w[i] / h->tap_h[i] : th * 4 / 3;
         tx -= tw;
-        SDL_Rect dst = { tx, H - 8 - th, tw, th };
+        SDL_Rect dst = { tx, ty, tw, th };
         hud_fill(ren, (SDL_Rect){ dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2 }, 0, 0, 0, 200);
         if (h->tap_tex[i]) SDL_RenderCopy(ren, h->tap_tex[i], NULL, &dst);
         SDL_SetRenderDrawColor(ren, 255, 255, 255, 60);
@@ -412,10 +416,11 @@ void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
     /* called last in the overlay, so the taps land on top of whatever sheet is up */
     if (h->mode == MODE_PANEL) {
         draw_panel(h, ren, W, H);
-        draw_taps(h, ren, W, H);
+        draw_taps(h, ren, W, H, 1);
         return;
     }
-    if (h->mode != MODE_HELP && h->mode != MODE_PROJECT) draw_taps(h, ren, W, H);
+    if (h->mode == MODE_EDIT) draw_taps(h, ren, W, H, 1);
+    if (h->mode == MODE_MAIN) draw_taps(h, ren, W, H, 0);
     h->nrows = 0;
     if (h->mode == MODE_MAIN) {
         h->panel = (SDL_Rect){ 0, 0, 0, 0 };
