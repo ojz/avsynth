@@ -24,6 +24,8 @@ add_executable(vsynth
   src/project.c
   src/picker.c
   src/hud.c
+  src/graph.c
+  src/editor.c
 )
 
 target_include_directories(vsynth PRIVATE src)
@@ -33,7 +35,7 @@ target_link_libraries(vsynth PRIVATE
 if(MSVC)
   target_compile_options(vsynth PRIVATE /W4)
 else()
-  target_compile_options(vsynth PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  target_compile_options(vsynth PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
 endif()
 
 if(WIN32)

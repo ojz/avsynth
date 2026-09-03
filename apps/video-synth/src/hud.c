@@ -31,6 +31,12 @@ struct Hud {
 
     int    visible;
     int    patch_slot;
+    char   chain_name[64];
+
+    SDL_Texture *tap_tex[GRAPH_MAX_TAPS];
+    int          tap_w[GRAPH_MAX_TAPS], tap_h[GRAPH_MAX_TAPS];
+    char         tap_name[GRAPH_MAX_TAPS][32];
+    int          ntaps;
     int    cap_x, cap_y, cap_w, cap_h;
     double fps;
     char   notice[160];
@@ -167,6 +173,8 @@ Hud *hud_create(SDL_Renderer *ren, const Rack *rack)
 void hud_destroy(Hud *h)
 {
     if (!h) return;
+    for (int i = 0; i < GRAPH_MAX_TAPS; i++)
+        if (h->tap_tex[i]) SDL_DestroyTexture(h->tap_tex[i]);
     if (h->atlas) SDL_DestroyTexture(h->atlas);
     if (h->font) TTF_CloseFont(h->font);
     free(h);
@@ -185,6 +193,42 @@ void hud_notice(Hud *h, const char *msg)
     snprintf(h->notice, sizeof h->notice, "%s", msg);
     h->notice_until = SDL_GetTicks() + NOTICE_MS;
 }
+void hud_set_chain_name(Hud *h, const char *name)
+{
+    snprintf(h->chain_name, sizeof h->chain_name, "%s", name ? name : "");
+}
+
+void hud_set_tap_count(Hud *h, int n, const char names[][32])
+{
+    if (n > GRAPH_MAX_TAPS) n = GRAPH_MAX_TAPS;
+    for (int i = 0; i < GRAPH_MAX_TAPS; i++) {
+        if (h->tap_tex[i]) { SDL_DestroyTexture(h->tap_tex[i]); h->tap_tex[i] = NULL; }
+        h->tap_w[i] = h->tap_h[i] = 0;
+        if (i < n) snprintf(h->tap_name[i], sizeof h->tap_name[i], "%s", names[i]);
+    }
+    h->ntaps = n;
+}
+
+void hud_set_tap_frame(Hud *h, int tap, const uint8_t *bgra, int w, int h_, int stride)
+{
+    if (tap < 0 || tap >= h->ntaps) return;
+    if (!h->tap_tex[tap] || h->tap_w[tap] != w || h->tap_h[tap] != h_) {
+        if (h->tap_tex[tap]) SDL_DestroyTexture(h->tap_tex[tap]);
+        h->tap_tex[tap] = SDL_CreateTexture(h->ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h_);
+        if (!h->tap_tex[tap]) return;
+        h->tap_w[tap] = w;
+        h->tap_h[tap] = h_;
+    }
+    SDL_UpdateTexture(h->tap_tex[tap], NULL, bgra, stride);
+}
+
+/* ---------- shared text API ---------- */
+
+static void text(Hud *h, int x, int y, SDL_Color col, const char *s);
+void hud_text(Hud *h, int x, int y, SDL_Color col, const char *s) { text(h, x, y, col, s); }
+int  hud_text_width(const Hud *h, const char *s) { return text_width(h, s); }
+int  hud_line_h(const Hud *h) { return h->line_h; }
+int  hud_char_w(const Hud *h) { return h->char_w; }
 
 /* ---------- drawing ---------- */
 
@@ -208,14 +252,33 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
 
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
+    /* tap thumbnails along the bottom edge, right-aligned */
+    if (h->ntaps > 0) {
+        int th = H / 5;
+        if (th < 60) th = 60;
+        int tx = W - 8;
+        for (int i = h->ntaps - 1; i >= 0; i--) {
+            int tw = h->tap_h[i] > 0 ? th * h->tap_w[i] / h->tap_h[i] : th * 4 / 3;
+            tx -= tw;
+            SDL_Rect dst = { tx, H - 8 - th, tw, th };
+            fill(ren, (SDL_Rect){ dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2 }, 0, 0, 0, 200);
+            if (h->tap_tex[i]) SDL_RenderCopy(ren, h->tap_tex[i], NULL, &dst);
+            SDL_SetRenderDrawColor(ren, 255, 255, 255, 60);
+            SDL_RenderDrawRect(ren, &dst);
+            fill(ren, (SDL_Rect){ dst.x, dst.y, text_width(h, h->tap_name[i]) + 6, h->line_h }, 0, 0, 0, 170);
+            text(h, dst.x + 3, dst.y, C_DIM, h->tap_name[i]);
+            tx -= 6;
+        }
+    }
+
     const int pad = 6, rowh = h->line_h + 2;
-    const int name_w  = h->char_w * 6 + 4;
+    const int name_w  = h->char_w * 8 + 4;
     const int label_w = h->char_w * 11 + 4;
     const int bar_w   = 110;
     const int val_w   = h->char_w * 8;
     static const char *FOOTER[3] = {
-        "tab/arrows knob  space bypass  bksp reset  r reset all",
-        "1-0 load patch  shift+1-0 save  x random  X wild",
+        "tab/arrows knob  space bypass  bksp reset  r reset all  x random",
+        "1-0 load preset  shift+1-0 save  e edit chain  pgup/pgdn chain",
         "c region  f fullscreen  h hide panel  q quit" };
     int panel_w = pad * 2 + name_w + label_w + bar_w + 8 + val_w;
     for (int i = 0; i < 3; i++)
@@ -248,6 +311,7 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
     } else {
         char hdr[200];
         int n = 0;
+        n += snprintf(hdr + n, sizeof hdr - n, "%.16s ", h->chain_name[0] ? h->chain_name : "chain");
         if (h->patch_slot > 0) n += snprintf(hdr + n, sizeof hdr - n, "P%d  ", h->patch_slot);
         else                   n += snprintf(hdr + n, sizeof hdr - n, "--  ");
         snprintf(hdr + n, sizeof hdr - n, "cap %d,%d %dx%d   %.0f fps",
@@ -279,7 +343,7 @@ void hud_draw(SDL_Renderer *ren, int W, int H, void *ud)
         SDL_Color tc = on ? (selected ? C_SEL : C_TEXT) : C_OFF;
         SDL_Color nc = on ? C_DIM : C_OFF;
 
-        text(h, x, y + 1, nc, md->name);
+        textf(h, x, y + 1, nc, "%.8s", md->label);
 
         if (c.knob < 0) {
             text(h, x + name_w, y + 1, tc, on ? "[x] on" : "[ ] off");
