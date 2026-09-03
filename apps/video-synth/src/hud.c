@@ -318,8 +318,8 @@ void hud_footer(Hud *h, const SDL_Rect *body, const char *left, const char *righ
 static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H, int in_sheet)
 {
     if (h->ntaps <= 0) return;
-    int th = H / 5;
-    if (th < 60) th = 60;
+    int th = in_sheet ? H / 8 : H / 5;   /* smaller inside the sheet so knob values stay readable */
+    if (th < 48) th = 48;
     int tx = in_sheet ? h->panel.x + h->panel.w - PAD : W - 8;
     int ty = in_sheet ? h->body_top : H - 8 - th;
     for (int i = h->ntaps - 1; i >= 0; i--) {
