@@ -3,8 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#define PI_F 3.14159265358979323846f
-#define KNOB_RADIUS 27.0f
+#define SLIDER_WIDTH 104.0f
 
 typedef enum { CONTROL_KNOB, CONTROL_SWITCH } ControlType;
 typedef enum {
@@ -138,29 +137,35 @@ static void section(SDL_Renderer *r, float x, float y, float w, float h,
     text(r, x + 9, y + 9, title, 236, 231, 213);
 }
 
-static void knob(SDL_Renderer *r, const Control *c, float value, bool active)
+static void slider(SDL_Renderer *r, const Control *c, float value, bool active)
 {
-    SDL_FPoint ring[33];
     float normalized = (value - c->minimum) / (c->maximum - c->minimum);
-    float angle = (-135 + normalized * 270) * PI_F / 180;
+    SDL_FRect track = {c->x - SLIDER_WIDTH / 2, c->y - 3, SLIDER_WIDTH, 6};
+    SDL_FRect fill = track;
+    SDL_FRect handle = {track.x + normalized * track.w - 5, c->y - 12, 10, 24};
     char display[20];
-    int point;
-    for (point = 0; point <= 32; ++point) {
-        float theta = point / 32.0f * 2 * PI_F;
-        ring[point].x = c->x + cosf(theta) * KNOB_RADIUS;
-        ring[point].y = c->y + sinf(theta) * KNOB_RADIUS;
-    }
-    SDL_SetRenderDrawColor(r, active ? 232 : 112, active ? 180 : 115, active ? 67 : 107, 255);
-    SDL_RenderLines(r, ring, 33);
-    SDL_FRect center = {c->x - 20, c->y - 20, 40, 40};
-    SDL_SetRenderDrawColor(r, 8, 9, 9, 255);
-    SDL_RenderFillRect(r, &center);
+    fill.w *= normalized;
+    SDL_SetRenderDrawColor(r, 9, 10, 10, 255);
+    SDL_RenderFillRect(r, &track);
+    SDL_SetRenderDrawColor(r, active ? 232 : 126, active ? 180 : 128, active ? 67 : 116, 255);
+    SDL_RenderFillRect(r, &fill);
     SDL_SetRenderDrawColor(r, 231, 224, 196, 255);
-    SDL_RenderLine(r, c->x, c->y, c->x + cosf(angle) * 19, c->y + sinf(angle) * 19);
-    text(r, c->x - SDL_strlen(c->label) * 4.0f, c->y + 35, c->label, 174, 170, 154);
+    SDL_RenderFillRect(r, &handle);
+    text(r, c->x - SDL_strlen(c->label) * 4.0f, c->y - 30, c->label, 174, 170, 154);
     if (c->maximum > 100) SDL_snprintf(display, sizeof(display), "%.0f", value);
     else SDL_snprintf(display, sizeof(display), "%.2f", value);
-    text(r, c->x - SDL_strlen(display) * 4.0f, c->y + 48, display, 228, 219, 190);
+    text(r, c->x - SDL_strlen(display) * 4.0f, c->y + 19, display, 228, 219, 190);
+}
+
+static void lfo_led(SDL_Renderer *r, float x, float y, bool positive)
+{
+    SDL_FRect red = {x - 17, y, 12, 12};
+    SDL_FRect green = {x + 5, y, 12, 12};
+    SDL_SetRenderDrawColor(r, positive ? 58 : 239, positive ? 27 : 62, positive ? 24 : 48, 255);
+    SDL_RenderFillRect(r, &red);
+    SDL_SetRenderDrawColor(r, positive ? 67 : 22, positive ? 221 : 61, positive ? 94 : 34, 255);
+    SDL_RenderFillRect(r, &green);
+    text(r, x - 28, y + 18, "-     +", 121, 126, 116);
 }
 
 static void toggle(SDL_Renderer *r, const Control *c, float value, bool active)
@@ -224,7 +229,7 @@ void panel_render(SDL_Renderer *r, Synth *preview, const SynthParameters *parame
     for (index = 0; index < CONTROL_COUNT; ++index) {
         float value = value_of(parameters, controls[index].id);
         bool active = panel->active_control == index;
-        if (controls[index].type == CONTROL_KNOB) knob(r, &controls[index], value, active);
+        if (controls[index].type == CONTROL_KNOB) slider(r, &controls[index], value, active);
         else toggle(r, &controls[index], value, active);
     }
     text(r, 82, 108, "VCO 1", 225, 174, 73);
@@ -233,6 +238,9 @@ void panel_render(SDL_Renderer *r, Synth *preview, const SynthParameters *parame
     text(r, 82, 448, "LFO 1", 83, 190, 158);
     text(r, 237, 448, "LFO 2", 83, 190, 158);
     text(r, 392, 448, "LFO 3", 83, 190, 158);
+    lfo_led(r, 105, 465, preview->lfos[0].phase < 0.5f);
+    lfo_led(r, 260, 465, preview->lfos[1].phase < 0.5f);
+    lfo_led(r, 415, 465, preview->lfos[2].phase < 0.5f);
     SDL_SetRenderDrawColor(r, audio_enabled ? 41 : 76, audio_enabled ? 111 : 39,
                            audio_enabled ? 74 : 35, 255);
     SDL_RenderFillRect(r, &audio);
@@ -248,8 +256,8 @@ static int hit_control(float x, float y)
 {
     int index;
     for (index = CONTROL_COUNT - 1; index >= 0; --index) {
-        float half_width = controls[index].type == CONTROL_KNOB ? 38 : 45;
-        float half_height = controls[index].type == CONTROL_KNOB ? 38 : 18;
+        float half_width = controls[index].type == CONTROL_KNOB ? SLIDER_WIDTH / 2 + 6 : 45;
+        float half_height = controls[index].type == CONTROL_KNOB ? 18 : 18;
         if (fabsf(x - controls[index].x) <= half_width &&
             fabsf(y - controls[index].y) <= half_height) return index;
     }
@@ -272,20 +280,17 @@ bool panel_mouse_down(PanelState *panel, SynthParameters *parameters,
         return true;
     }
     panel->dragging = true;
-    panel->drag_start_y = y;
-    panel->drag_start_value = value_of(parameters, controls[hit].id);
-    return false;
+    return panel_mouse_motion(panel, parameters, x);
 }
 
-bool panel_mouse_motion(PanelState *panel, SynthParameters *parameters, float y)
+bool panel_mouse_motion(PanelState *panel, SynthParameters *parameters, float x)
 {
     const Control *control;
-    float range;
     float value;
     if (!panel->dragging) return false;
     control = &controls[panel->active_control];
-    range = control->maximum - control->minimum;
-    value = panel->drag_start_value + (panel->drag_start_y - y) * range / 180;
+    value = control->minimum + clampf((x - (control->x - SLIDER_WIDTH / 2)) / SLIDER_WIDTH, 0, 1) *
+            (control->maximum - control->minimum);
     value = control->minimum + roundf((value - control->minimum) / control->step) * control->step;
     set_value(parameters, control->id, clampf(value, control->minimum, control->maximum));
     return true;

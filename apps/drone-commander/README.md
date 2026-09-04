@@ -1,41 +1,4 @@
-# avsynth
-
-A collection of small audiovisual synthesizers and signal experiments. Each
-application is independently buildable while the repository root provides
-common build, test, release, and artifact conventions.
-
-## Applications
-
-| Application | Description | Documentation |
-| --- | --- | --- |
-| Drone Commander | C17/SDL3 three-oscillator drone synthesizer | [apps/drone-commander/README.md](apps/drone-commander/README.md) |
-| Video synth | Reserved for import from the companion project | `apps/video-synth/` |
-
-## Layout
-
-```text
-apps/                    Independent synthesizer applications
-assets/screenshots/      Repository screenshots grouped by application
-dist/                    Local packaged builds (ignored by Git)
-.github/workflows/       CI builds and downloadable artifacts
-```
-
-## Build
-
-The default root commands build and run Drone Commander:
-
-```powershell
-make build
-make run
-make test
-```
-
-Audio starts hard-muted. See the application documentation for controls and
-signal-path details.
-
-Every push and pull request builds and tests the Windows executable. Successful
-workflow runs publish a downloadable `drone-commander-windows` artifact. Version
-tags matching `v*` also create a GitHub release with the packaged executable.# Drone Commander
+# Drone Commander
 
 A C17 synthesizer and signal-path laboratory hosted by SDL3. It is the digital
 sketchbook for a later, separate, fully analog hardware synthesizer.
@@ -70,7 +33,7 @@ ctest --test-dir build --output-on-failure
 
 ## Controls
 
-- `Mouse`: drag knobs vertically; click waveform, sync, and anti-alias switches
+- `Mouse`: drag sliders horizontally; click waveform, sync, and anti-alias switches
 - `R`: reset all parameters to defaults
 - `Ctrl+Shift+A` or click banner: deliberately enable audio
 - `Space` or click banner: mute audio immediately
@@ -121,6 +84,10 @@ Combines the three oscillators with adjustable `tanhf` soft-saturation drive.
 
 Each LFO has an independent rate and level. Their level-weighted outputs are
 summed and routed to both the VCF and VCA modulation-depth controls.
+
+The LFO output is bipolar: the square wave alternates between `-1` and `+1`
+before level scaling. Each LFO has a red/green indicator pair; red shows the
+negative half-cycle and green shows the positive half-cycle.
 
 LFO 2 can hard-sync to LFO 1, and LFO 3 can hard-sync to LFO 2. A synced LFO
 resets its phase whenever the preceding LFO begins a new cycle. This corresponds

@@ -115,7 +115,7 @@ int main(void)
                 if (audio_clicked) set_audio(audio_stream, window, &audio_enabled, !audio_enabled);
             } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) panel_mouse_up(&panel);
             else if (event.type == SDL_EVENT_MOUSE_MOTION &&
-                     panel_mouse_motion(&panel, &parameters, event.motion.y)) {
+                     panel_mouse_motion(&panel, &parameters, event.motion.x)) {
                 publish_controls(&controls, &parameters);
             } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
                 if (event.key.key == SDLK_ESCAPE) running = false;

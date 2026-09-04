@@ -1,6 +1,14 @@
-# Drone Commander Agent Instructions
+# avsynth Agent Instructions
+
+## Git Workflow
+
+- Work directly on `main`; do not create feature branches unless the user explicitly requests one.
+- After completing and validating repository changes, commit them on `main` and push to the configured GitHub remote.
+- Use the repository-local Git author configuration. Never force-push or rewrite published history unless explicitly requested.
 
 ## Project Direction
+
+The repository contains independent audiovisual synthesizer applications under `apps/`. Keep each application self-contained and put shared code under `shared/` only after at least two applications genuinely use it.
 
 Drone Commander has two related but separate implementations:
 

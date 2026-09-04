@@ -2,7 +2,7 @@ CMAKE ?= $(shell where cmake.exe 2>NUL || echo $(LOCALAPPDATA)/Microsoft/WinGet/
 BUILD_DIR ?= build
 BIN := drone_commander.exe
 
-SRCS := $(wildcard src/*) CMakeLists.txt
+SRCS := $(wildcard apps/drone-commander/src/*) apps/drone-commander/CMakeLists.txt CMakeLists.txt
 
 .PHONY: all build run test clean
 

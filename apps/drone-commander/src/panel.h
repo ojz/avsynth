@@ -12,15 +12,13 @@
 typedef struct {
     int active_control;
     bool dragging;
-    float drag_start_y;
-    float drag_start_value;
 } PanelState;
 
 void panel_render(SDL_Renderer *renderer, Synth *preview, const SynthParameters *parameters,
                   const PanelState *panel, bool audio_enabled);
 bool panel_mouse_down(PanelState *panel, SynthParameters *parameters,
                       float x, float y, bool *audio_button_clicked);
-bool panel_mouse_motion(PanelState *panel, SynthParameters *parameters, float y);
+bool panel_mouse_motion(PanelState *panel, SynthParameters *parameters, float x);
 void panel_mouse_up(PanelState *panel);
 
 #endif
