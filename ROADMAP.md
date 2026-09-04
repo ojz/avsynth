@@ -250,7 +250,48 @@ this lab was lost. None of them is scheduled.
 - **A filter app** in the spirit of the parts of a Sherman Filterbank that
   actually got used: gain into a high-pass into a low-pass. No amplitude
   envelope, no cutoff envelope.
+- **SHELVES.** A low-pass, then a bank of band-passes at harmonically related
+  frequencies, then a high-pass, with the band-passes' bandwidth as the main
+  control. Named after window louvres: turning the plates lets in more or less
+  light, and here more or less of the spectrum. A resonator bank whose one
+  gesture opens and closes the whole thing.
+- **PING.** Several low-frequency square waves into a resonant band-pass, which
+  pings. A technique the user also patches on their modular, and it needs the
+  squares' phase and pulse width, not just their rate. This is the app that
+  most wants generative presets, below.
+- **PROBE.** Shows the camera, takes an x and a y in, and outputs the
+  luminosity of that pixel. A sequencer whose pattern is a physical object:
+  draw on paper, point the camera at it, and read the drawing as a signal.
+  Wants vsynth's capture path and the fader's address model, and nothing else.
+- **MOSAIC.** Cut a familiar record into micro-fragments, cut a live input into
+  micro-fragments, and reconstruct the input out of the record's pieces.
+  Concatenative resynthesis. The one idea here that never got built before.
 - **A kick drum app.** Crude on purpose.
+
+### 7.1 Generative presets
+
+The most portable idea from the lost version, and it belongs in the shared
+layer rather than in one app. A preset was not a set of stored values but an
+**algorithm that produced values**, with different algorithms embodying
+different constraints. One kept the base frequencies harmonically related, so
+every roll of the dice was in tune with itself; another was free.
+
+That is a different thing from randomising a knob, and it generalises: a fader
+already carries range, taper, neutral and a stable address, which is most of
+what a constrained generator needs. vsynth's `x` and `X` randomize are the
+crude seed of it. Recording it as direction because `shared/store` (P5) should
+be able to hold a generator alongside stored values rather than being retrofitted
+for it later, and because it is the answer to "presets are boring".
+
+### 7.2 What this tells the software
+
+These are not a work queue; they describe the kind of sound and the kind of
+experimentation the lab is for. Read together they say: drones and resonance
+rather than beats and songs; slow signals that modulate other signals; physical
+and visual inputs treated as control voltage; constrained randomness preferred
+over recall; and every parameter reachable while the thing is running. Drone
+Commander and vsynth already represent that fairly well, which is why they are
+the two that exist.
 
 Why not SuperCollider, where much of this existed before: deployment is a
 single static executable here, the result is stable, and writing the DSP
@@ -292,6 +333,14 @@ A later pass made the hit-testing pixel-density independent.
   The panel is on a two-row grid with one accent colour; every continuous
   control is a fader with a unit, a neutral tick and an exponential taper where
   it is a frequency. `assets/screenshots/drone-commander.png` is the result.
+- Oscillators gained **pulse width**: duty 0.02 to 0.98, neutral 0.5, with the
+  PolyBLEP falling edge moved to the duty rather than fixed at half a cycle.
+  The DC offset it introduces (2 x duty - 1) is left in, because an analog VCO
+  has it too and it biases the saturation stage asymmetrically, which is part
+  of what pulse width sounds like. `dsp_tests` measures the duty directly.
+  No phase control: a free-running drone oscillator's absolute phase is
+  inaudible, and phase only becomes a control when something retriggers it,
+  which is PING's problem in section 7, not this app's.
 - The old panel's specific faults, for the record: the FM cascade slider
   crossed the oscillator section border, the anti-alias label overflowed it,
   five sections each had their own title colour, the VCA and output sections

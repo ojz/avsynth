@@ -31,7 +31,8 @@ static float poly_blep(float t, float dt)
     return 0.0f;
 }
 
-static float waveform_sample(Waveform waveform, float phase, float dt, int blep)
+static float waveform_sample(Waveform waveform, float phase, float dt, int blep,
+                             float pulse_width)
 {
     switch (waveform) {
     case WAVE_SAW: {
@@ -42,12 +43,19 @@ static float waveform_sample(Waveform waveform, float phase, float dt, int blep)
         return sample;
     }
     case WAVE_SQUARE: {
-        float sample = phase < 0.5f ? 1.0f : -1.0f;
+        /* Rising edge at phase 0, falling edge at the duty cycle. A duty of
+         * 0.5 is the plain square the earlier fixed version produced.
+         *
+         * Note the DC offset this introduces, 2 * duty - 1: an analog VCO does
+         * the same, and it biases the saturation stage asymmetrically, which is
+         * part of what pulse width sounds like. It is left in on purpose. */
+        float duty = (pulse_width > 0.0f && pulse_width < 1.0f) ? pulse_width : 0.5f;
+        float sample = phase < duty ? 1.0f : -1.0f;
         if (blep) {
-            float phase_half = phase + 0.5f;
-            phase_half -= floorf(phase_half);
+            float falling = phase - duty;
+            falling -= floorf(falling);
             sample += poly_blep(phase, dt);
-            sample -= poly_blep(phase_half, dt);
+            sample -= poly_blep(falling, dt);
         }
         return sample;
     }
@@ -63,9 +71,9 @@ SynthParameters synth_default_parameters(void)
 {
     SynthParameters parameters = {
         .oscillators = {
-            {110.0f, 0.70f, WAVE_SAW},
-            {164.81f, 0.55f, WAVE_SAW},
-            {220.0f, 0.40f, WAVE_SINE},
+            {110.0f, 0.70f, WAVE_SAW, 0.5f},
+            {164.81f, 0.55f, WAVE_SAW, 0.5f},
+            {220.0f, 0.40f, WAVE_SINE, 0.5f},
         },
         .cutoff = 1400.0f,
         .cutoff_mod_depth = 900.0f,
@@ -113,6 +121,11 @@ void synth_set_parameters(Synth *synth, const SynthParameters *parameters)
         synth->oscillators[oscillator_index].amplitude =
             clampf(parameters->oscillators[oscillator_index].amplitude, 0.0f, 1.0f);
         synth->oscillators[oscillator_index].waveform = parameters->oscillators[oscillator_index].waveform;
+        {
+            float duty = parameters->oscillators[oscillator_index].pulse_width;
+            synth->oscillators[oscillator_index].pulse_width =
+                duty > 0.0f ? clampf(duty, 0.02f, 0.98f) : 0.5f;
+        }
     }
 
     for (lfo_index = 0; lfo_index < SYNTH_LFO_COUNT; ++lfo_index) {
@@ -130,7 +143,9 @@ float oscillator_process_ex(Oscillator *oscillator, float sample_rate, float fm_
 {
     float effective_freq = clampf(oscillator->frequency + fm_offset, 0.0f, sample_rate * 0.45f);
     float dt = effective_freq / sample_rate;
-    float sample = oscillator->amplitude * waveform_sample(oscillator->waveform, oscillator->phase, dt, blep);
+    float sample = oscillator->amplitude *
+                   waveform_sample(oscillator->waveform, oscillator->phase, dt, blep,
+                                   oscillator->pulse_width);
     oscillator->phase += dt;
     oscillator->phase -= floorf(oscillator->phase);
     return sample;

@@ -19,6 +19,10 @@ typedef struct {
     float frequency;
     float amplitude;
     Waveform waveform;
+    /* Duty cycle of WAVE_SQUARE, 0 to 1. Ignored by the other waveforms.
+     * Zero or out of range is treated as 0.5, so an Oscillator built without
+     * naming this field is still a square rather than silence. */
+    float pulse_width;
 } Oscillator;
 
 typedef struct {
@@ -30,6 +34,7 @@ typedef struct {
     float frequency;
     float amplitude;
     Waveform waveform;
+    float pulse_width;
 } OscillatorParameters;
 
 typedef struct {

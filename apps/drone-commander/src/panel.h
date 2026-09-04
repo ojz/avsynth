@@ -9,7 +9,7 @@
 #include <stdbool.h>
 
 #define PANEL_WIDTH 1180
-#define PANEL_HEIGHT 680
+#define PANEL_HEIGHT 760
 
 /*
  * The panel is a ParamSet laid out on a grid. Every continuous control is a

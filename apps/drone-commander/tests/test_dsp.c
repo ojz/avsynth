@@ -147,6 +147,46 @@ static void test_lfo_sync_to_previous(void)
                 "free-running LFO does not reset with the preceding LFO");
 }
 
+/* The fraction of a cycle a naive square spends high, which is what pulse
+ * width means. Anti-aliasing is off here so the edges land where they should
+ * rather than being rounded by the correction. */
+static float duty_of(float pulse_width)
+{
+    Oscillator oscillator = {.frequency = 100.0f, .amplitude = 1.0f,
+                             .waveform = WAVE_SQUARE, .pulse_width = pulse_width};
+    int high = 0;
+    for (int i = 0; i < TEST_FRAME_COUNT; ++i)
+        if (oscillator_process_ex(&oscillator, TEST_SAMPLE_RATE, 0.0f, 0) > 0.0f) ++high;
+    return (float)high / (float)TEST_FRAME_COUNT;
+}
+
+static void test_pulse_width(void)
+{
+    expect_true(fabsf(duty_of(0.5f) - 0.5f) < 0.01f, "a 0.5 duty square is high half the time");
+    expect_true(fabsf(duty_of(0.25f) - 0.25f) < 0.01f, "a 0.25 duty square is high a quarter of the time");
+    expect_true(fabsf(duty_of(0.75f) - 0.75f) < 0.01f, "a 0.75 duty square is high three quarters of the time");
+
+    /* An oscillator built without naming pulse_width must still be a square,
+     * not silence, so old code and test fixtures keep working. */
+    expect_true(fabsf(duty_of(0.0f) - 0.5f) < 0.01f, "an unset pulse width behaves as 0.5");
+
+    /* Pulse width must not break the anti-aliased path or the bounds. */
+    SynthParameters parameters = synth_default_parameters();
+    Synth synth;
+    parameters.oscillators[0].waveform = WAVE_SQUARE;
+    parameters.oscillators[0].pulse_width = 0.08f;
+    parameters.oscillators[1].waveform = WAVE_SQUARE;
+    parameters.oscillators[1].pulse_width = 0.92f;
+    parameters.vca_amplitude = 1.0f;
+    synth_init(&synth, TEST_SAMPLE_RATE, &parameters);
+    for (int i = 0; i < TEST_FRAME_COUNT; ++i) {
+        float sample = synth_process_sample(&synth);
+        expect_true(sample >= -1.0f && sample <= 1.0f && sample == sample,
+                    "extreme pulse widths stay bounded and finite");
+        if (failures) break;
+    }
+}
+
 int main(void)
 {
     test_phase_wraps();
@@ -156,6 +196,7 @@ int main(void)
     test_polyblep_and_fm_stability();
     test_parameter_smoothing();
     test_lfo_sync_to_previous();
+    test_pulse_width();
 
     if (failures == 0) {
         puts("All DSP tests passed.");

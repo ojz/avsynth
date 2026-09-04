@@ -12,10 +12,10 @@
  */
 #define MARGIN     20.0f
 #define ROW1_Y     68.0f
-#define ROW1_H     300.0f
-#define ROW2_Y     380.0f
+#define ROW1_H     380.0f
+#define ROW2_Y     460.0f
 #define ROW2_H     268.0f
-#define FOOTER_Y   660.0f
+#define FOOTER_Y   740.0f
 
 #define COL_W      168.0f      /* a column inside the three-column panels */
 #define CELL_H     54.0f       /* a fader cell */
@@ -23,9 +23,9 @@
 #define TALL_H     62.0f       /* a fader cell in the single-column panels */
 
 enum {
-    P_O1_FREQ, P_O1_LEVEL, P_O1_WAVE,
-    P_O2_FREQ, P_O2_LEVEL, P_O2_WAVE,
-    P_O3_FREQ, P_O3_LEVEL, P_O3_WAVE,
+    P_O1_FREQ, P_O1_LEVEL, P_O1_PULSE, P_O1_WAVE,
+    P_O2_FREQ, P_O2_LEVEL, P_O2_PULSE, P_O2_WAVE,
+    P_O3_FREQ, P_O3_LEVEL, P_O3_PULSE, P_O3_WAVE,
     P_FM_DEPTH, P_FM_ALIAS,
     P_L1_RATE, P_L1_LEVEL,
     P_L2_RATE, P_L2_LEVEL, P_L2_SYNC,
@@ -57,6 +57,11 @@ static Param PARAMS[P_COUNT] = {
       .taper=PARAM_EXP, .min=20, .max=2000, .neutral=110.0,   .coarse=10, .fine=1, .ultra=0.1 },
     { .group="osc1", .key="level", .label="LEVEL",     .kind=PARAM_FADER,
       .taper=PARAM_LINEAR, .min=0, .max=1, .neutral=0.70 },
+    /* Duty cycle of the square. Inert on the other waveforms, which is why it
+     * sits below LEVEL rather than next to WAVE. */
+    { .group="osc1", .key="pulse", .label="PULSE WIDTH", .kind=PARAM_FADER,
+      .taper=PARAM_LINEAR, .min=0.02, .max=0.98, .neutral=0.5,
+      .coarse=0.01, .fine=0.001, .ultra=0.0001 },
     { .group="osc1", .key="wave",  .label="WAVE",      .kind=PARAM_ENUM,
       .min=0, .max=WAVE_COUNT-1, .neutral=WAVE_SAW, .names=WAVE_NAMES, .nnames=WAVE_COUNT },
 
@@ -64,6 +69,9 @@ static Param PARAMS[P_COUNT] = {
       .taper=PARAM_EXP, .min=20, .max=2000, .neutral=164.81, .coarse=10, .fine=1, .ultra=0.1 },
     { .group="osc2", .key="level", .label="LEVEL",     .kind=PARAM_FADER,
       .taper=PARAM_LINEAR, .min=0, .max=1, .neutral=0.55 },
+    { .group="osc2", .key="pulse", .label="PULSE WIDTH", .kind=PARAM_FADER,
+      .taper=PARAM_LINEAR, .min=0.02, .max=0.98, .neutral=0.5,
+      .coarse=0.01, .fine=0.001, .ultra=0.0001 },
     { .group="osc2", .key="wave",  .label="WAVE",      .kind=PARAM_ENUM,
       .min=0, .max=WAVE_COUNT-1, .neutral=WAVE_SAW, .names=WAVE_NAMES, .nnames=WAVE_COUNT },
 
@@ -71,6 +79,9 @@ static Param PARAMS[P_COUNT] = {
       .taper=PARAM_EXP, .min=20, .max=2000, .neutral=220.0,  .coarse=10, .fine=1, .ultra=0.1 },
     { .group="osc3", .key="level", .label="LEVEL",     .kind=PARAM_FADER,
       .taper=PARAM_LINEAR, .min=0, .max=1, .neutral=0.40 },
+    { .group="osc3", .key="pulse", .label="PULSE WIDTH", .kind=PARAM_FADER,
+      .taper=PARAM_LINEAR, .min=0.02, .max=0.98, .neutral=0.5,
+      .coarse=0.01, .fine=0.001, .ultra=0.0001 },
     { .group="osc3", .key="wave",  .label="WAVE",      .kind=PARAM_ENUM,
       .min=0, .max=WAVE_COUNT-1, .neutral=WAVE_SINE, .names=WAVE_NAMES, .nnames=WAVE_COUNT },
 
@@ -139,6 +150,7 @@ static const float COL_X[3] = { 32.0f, 214.0f, 396.0f };
 
 static const int OSC_FREQ[3]  = { P_O1_FREQ, P_O2_FREQ, P_O3_FREQ };
 static const int OSC_LEVEL[3] = { P_O1_LEVEL, P_O2_LEVEL, P_O3_LEVEL };
+static const int OSC_PULSE[3] = { P_O1_PULSE, P_O2_PULSE, P_O3_PULSE };
 static const int OSC_WAVE[3]  = { P_O1_WAVE, P_O2_WAVE, P_O3_WAVE };
 static const int LFO_RATE[3]  = { P_L1_RATE, P_L2_RATE, P_L3_RATE };
 static const int LFO_LEVEL[3] = { P_L1_LEVEL, P_L2_LEVEL, P_L3_LEVEL };
@@ -176,12 +188,13 @@ static void layout(const UiText *t)
     const float mod_y = ROW2_Y + head + 10.0f;      /* 438 */
 
     for (int c = 0; c < 3; c++) {
-        place(OSC_FREQ[c],  (SDL_FRect){ COL_X[c], osc_y + 20.0f, COL_W, CELL_H }, t);
-        place(OSC_LEVEL[c], (SDL_FRect){ COL_X[c], osc_y + 82.0f, COL_W, CELL_H }, t);
-        place(OSC_WAVE[c],  (SDL_FRect){ COL_X[c], osc_y + 144.0f, COL_W, STEP_H }, t);
+        place(OSC_FREQ[c],  (SDL_FRect){ COL_X[c], osc_y + 20.0f,  COL_W, CELL_H }, t);
+        place(OSC_LEVEL[c], (SDL_FRect){ COL_X[c], osc_y + 82.0f,  COL_W, CELL_H }, t);
+        place(OSC_PULSE[c], (SDL_FRect){ COL_X[c], osc_y + 144.0f, COL_W, CELL_H }, t);
+        place(OSC_WAVE[c],  (SDL_FRect){ COL_X[c], osc_y + 206.0f, COL_W, STEP_H }, t);
     }
-    place(P_FM_DEPTH, (SDL_FRect){ COL_X[0], osc_y + 198.0f, 350.0f, CELL_H }, t);
-    place(P_FM_ALIAS, (SDL_FRect){ COL_X[2], osc_y + 207.0f, COL_W, STEP_H }, t);
+    place(P_FM_DEPTH, (SDL_FRect){ COL_X[0], osc_y + 258.0f, 350.0f, CELL_H }, t);
+    place(P_FM_ALIAS, (SDL_FRect){ COL_X[2], osc_y + 267.0f, COL_W, STEP_H }, t);
 
     for (int c = 0; c < 3; c++) {
         place(LFO_RATE[c],  (SDL_FRect){ COL_X[c], mod_y + 38.0f, COL_W, CELL_H }, t);
@@ -212,6 +225,7 @@ void panel_to_parameters(const PanelState *panel, SynthParameters *out)
         out->oscillators[c].frequency = (float)v[OSC_FREQ[c]];
         out->oscillators[c].amplitude = (float)v[OSC_LEVEL[c]];
         out->oscillators[c].waveform  = (Waveform)(int)floor(v[OSC_WAVE[c]] + 0.5);
+        out->oscillators[c].pulse_width = (float)v[OSC_PULSE[c]];
         out->lfos[c].frequency = (float)v[LFO_RATE[c]];
         out->lfos[c].amplitude = (float)v[LFO_LEVEL[c]];
         out->lfos[c].sync_to_previous =
@@ -234,6 +248,7 @@ void panel_from_parameters(PanelState *panel, const SynthParameters *in)
         paramset_set(s, OSC_FREQ[c], in->oscillators[c].frequency);
         paramset_set(s, OSC_LEVEL[c], in->oscillators[c].amplitude);
         paramset_set(s, OSC_WAVE[c], (double)in->oscillators[c].waveform);
+        paramset_set(s, OSC_PULSE[c], in->oscillators[c].pulse_width);
         paramset_set(s, LFO_RATE[c], in->lfos[c].frequency);
         paramset_set(s, LFO_LEVEL[c], in->lfos[c].amplitude);
         if (LFO_SYNC[c] >= 0) paramset_set(s, LFO_SYNC[c], in->lfos[c].sync_to_previous ? 1 : 0);

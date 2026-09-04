@@ -66,8 +66,18 @@ The rest:
 
 3 oscillators with selectable waveforms (Sine, Saw, Square, Triangle), each with:
 
-- Frequency
-- Amplitude
+- Frequency, on an exponential fader from 20 Hz to 2 kHz
+- Level
+- Pulse width, the duty cycle of the square from 0.02 to 0.98
+
+Pulse width moves the falling edge of the square; the rising edge stays at the
+start of the cycle. It does nothing to the other three waveforms. It also
+introduces a DC offset of `2 * duty - 1`, which is deliberate: an analog VCO
+does the same, and that offset biases the soft-saturation stage asymmetrically,
+which is a large part of what pulse width actually sounds like.
+
+There is no phase control. A free-running drone oscillator's absolute phase is
+inaudible; phase only becomes a control when something retriggers it.
 
 ### FM Cascade
 
