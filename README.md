@@ -18,12 +18,20 @@ Both are C17 on SDL3, built by one CMake project against system libraries from
 pkg-config. Nothing is vendored or downloaded at configure time, so both
 machines and CI resolve the same libraries from the same packages.
 
+Every continuous control in every app is a **fader**: it resets to a neutral,
+shows its value at full precision with its unit, and moves at three grains so a
+value can actually be dialled in. It carries a stable address, so a preset, a
+MIDI CC or a sequencer step can drive it without the app knowing which. That is
+the lab's shared control language, specified in [ROADMAP.md](ROADMAP.md)
+section 6 and implemented once in `shared/param` and `shared/ui`.
+
 ## Layout
 
 ```text
 apps/drone-commander/   audio drone synth
 apps/video-synth/       video feedback synth
-shared/                 code used by more than one app (empty until roadmap phase 3)
+shared/param/           the fader and parameter model, plain C, tested offline
+shared/ui/              the control surface on SDL3: how a fader looks and behaves
 tools/package.sh        release packaging: exe plus the DLLs it links
 assets/screenshots/     screenshots per application
 .github/workflows/      CI: build, test, artifacts, tagged releases

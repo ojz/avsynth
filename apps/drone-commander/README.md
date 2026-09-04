@@ -27,10 +27,37 @@ compiler; nothing is downloaded at configure time.
 
 ## Controls
 
-- `Mouse`: drag sliders horizontally; click waveform, sync, and anti-alias switches
-- `R`: reset all parameters to defaults
-- `Ctrl+Shift+A` or click banner: deliberately enable audio
-- `Space` or click banner: mute audio immediately
+![The panel](../../assets/screenshots/drone-commander.png)
+
+Every continuous control is a fader, the lab's shared control, so these
+gestures are the same in every app (see [ROADMAP](../../ROADMAP.md) section 6):
+
+| Gesture | Effect |
+|---|---|
+| Drag the track | absolute, follows the pointer |
+| Wheel | one fine step |
+| Ctrl + wheel | one coarse step |
+| Shift + wheel | one ultra-fine step |
+| Middle click, or double click | reset to the neutral |
+| `Tab`, `Shift+Tab` | select the next or previous control |
+| Arrows | nudge the selected control; Ctrl coarse, Shift ultra-fine |
+| `Backspace` | reset the selected control to its neutral |
+
+A fader shows its value at full precision with its unit, and the faint tick on
+the track is its neutral, so you can see where a reset will land. Frequencies
+are on an exponential track, which is what makes a 20 Hz to 12 kHz cutoff
+dialable at both ends; the ultra grain reaches 1 Hz, so an exact 440 Hz is a
+few scroll clicks rather than a pixel hunt. The window title always names the
+selected control and its value.
+
+Switches and enum steppers (wave, anti-alias, LFO sync) advance on click or
+wheel and wrap.
+
+The rest:
+
+- `R`: back to the default patch
+- `Ctrl+Shift+A` or click the banner: deliberately enable audio
+- `Space` or click the banner: mute audio immediately
 - `Escape`: quit
 
 ## Signal Path
@@ -76,12 +103,22 @@ Combines the three oscillators with adjustable `tanhf` soft-saturation drive.
 
 ### Modulation (3 x Square LFO)
 
-Each LFO has an independent rate and level. Their level-weighted outputs are
-summed and routed to both the VCF and VCA modulation-depth controls.
+Each LFO has an independent rate and level. Their outputs are summed and routed
+to both the VCF and VCA modulation-depth controls.
 
-The LFO output is bipolar: the square wave alternates between `-1` and `+1`
-before level scaling. Each LFO has a red/green indicator pair; red shows the
-negative half-cycle and green shows the positive half-cycle.
+**Level runs -1 to +1.** The square wave itself alternates between `-1` and
+`+1`, and the level scales it, so a negative level is the same amount of
+modulation with its sign flipped. Zero, in the middle of the track, is no
+modulation at all and is where a reset lands. Two LFOs at opposite levels
+cancel; one inverted against another at the same rate is a way to get a
+narrower sweep than either alone.
+
+The sum is normalised by the total of the levels' **magnitudes**, so inverting
+one LFO changes the shape of the modulation without changing its overall depth.
+
+Each LFO shows its phase as a single bar, split where the sign changes: red on
+the negative half, green on the positive, with the live half lit and a marker
+riding the current phase.
 
 LFO 2 can hard-sync to LFO 1, and LFO 3 can hard-sync to LFO 2. A synced LFO
 resets its phase whenever the preceding LFO begins a new cycle. This corresponds

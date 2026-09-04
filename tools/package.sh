@@ -19,6 +19,10 @@ set -eu
 BIN=${1:-build/bin}
 DIST=${2:-dist}
 
+# Resolve the repository from this script's own location, so the app READMEs
+# are found however the script was invoked, not only from the repository root.
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
 APPS="drone_commander vsynth"
 
 # Where the toolchain keeps its DLLs. A name the import table asks for that
@@ -28,8 +32,8 @@ LIBDIR=$(dirname "$(command -v cc 2>/dev/null || command -v gcc)")
 
 readme_for() {
     case $1 in
-    drone_commander) echo apps/drone-commander/README.md ;;
-    vsynth)          echo apps/video-synth/README.md ;;
+    drone_commander) echo "$ROOT/apps/drone-commander/README.md" ;;
+    vsynth)          echo "$ROOT/apps/video-synth/README.md" ;;
     *)               echo "" ;;
     esac
 }

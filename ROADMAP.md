@@ -1,54 +1,50 @@
 # avsynth roadmap
 
-*v2, 2026-09-04. The decisions below are made. The phases are ordered, not
+*v3, 2026-09-04. The decisions below are made. The phases are ordered, not
 scheduled. Update this file when a decision changes or a phase lands.*
 
-*Changed since v1, both on 2026-09-04: power moved from a 9/12 V pedal-style
-daisy chain to USB-C 5 V with analog rails made on board, D7 and P6 added for
-the cross-app control plane, and P1 and P2 landed.*
+*Changed since v2 (same day): hardware is parked, not cancelled, and the power
+question with it. Everything under `apps/` is now called an app. The fader is
+the lab's shared control (D8), signal conventions are fixed (D9), and the
+apps the lab is heading towards are written down in section 7 so they can be
+designed for without being built.*
 
 ## 1. Vision
 
-avsynth is a DIY synthesizer lab. Every instrument starts as a small C program
-where a topology, a set of ranges and a way of playing it can be tried out
-cheaply. The ones worth keeping become hardware.
+avsynth is a lab of small **apps**. Each one is a C program that tries out a
+topology, a set of ranges and a way of playing it. They are meant to be played,
+not just run, and eventually to be played together.
 
-The hardware side has its own rules, and they shape what the software side
-must record:
+The order of work is software first, by a long way. There is a great deal of
+experimentation to do before any of it is worth turning into a circuit, so
+hardware is parked: section 9 keeps what was already decided about it, and
+nothing in the current plan depends on it. The power question in particular is
+unsettled and deliberately not being thought about yet.
 
-- **Boards are made for assembly, not for soldering.** PCBs go to JLCPCB (or a
-  similar service) as Gerbers plus BOM and pick-and-place files, with every
-  SMT part placed by the machine. Hand soldering is the exception, reserved
-  for the panel parts that have no SMT equivalent: pots, jacks, switches.
-- **Instruments are small desktop boxes.** An empty ammo crate, a folded sheet
-  of aluminium, whatever is at hand. Eurorack is allowed for a module that
-  really wants to be one, but it is not the standard and nothing depends on it.
-- **The target input is USB-C 5 V power.** Each board makes the clean analog
-  rails it needs from that input and keeps switching noise out of the signal
-  path. Audio instruments expose a 3.5 mm line/headphone output as appropriate.
-- **The analog instruments stay analog.** The digital program is the
-  sketchbook: it settles the topology, the ranges, the modulation behaviour and
-  how the controls should feel. It is not firmware.
+What every app has in common:
 
-vsynth, the video feedback synth, belongs to the same lab even though it has
-no analog counterpart yet. It shares the way of working: a text or a table of
-parameters, knobs derived from it, presets, a loop you play by ear (or eye).
+- **Controls are faders** (D8). One control concept, one look, one set of
+  gestures, one way of being addressed by a preset or by MIDI, in every app.
+- **Signals agree** (D9). Audio and modulation are bipolar, clocks are ramps,
+  and connections between apps are named.
+- **Nothing is a plugin host.** Each app is its own executable, statically
+  reasoned about, started from `make run-<app>`.
 
 ## 2. What this repository is for
 
-- One directory per instrument under `apps/`. Each is an independent program
-  with its own README and, once it earns hardware, a `HARDWARE.md`.
-- Shared infrastructure under `shared/`, so that the second, third and tenth
-  bench cost a fraction of the first: parameter model, preset storage, the
-  on-screen control surface, later MIDI.
+- One directory per app under `apps/`, an independent program with its own
+  README.
+- Shared infrastructure under `shared/`, so the second, third and tenth app
+  cost a fraction of the first: the fader and parameter model, preset storage,
+  the control surface, later MIDI and the inter-app link.
 - One toolchain, one set of root commands, one CI that builds and packages
   every app.
 
 ## 3. Where things stand (2026-09-04, after P1 and P2)
 
-Two apps in one repository, on one toolchain, one C standard and one windowing
-API. What is left to unify is the code itself: the parameter model, preset
-storage and the control surface are still per app.
+Two apps, one toolchain, one C standard, one windowing API. What is left to
+unify is the code: the parameter model, preset storage and the control surface
+are still per app, and the two apps' controls neither look nor behave alike.
 
 | | Drone Commander | vsynth |
 |---|---|---|
@@ -56,16 +52,14 @@ storage and the control surface are still per app.
 | Standard | C17 | C17 |
 | Window / input | SDL3 from pkg-config | SDL3 + SDL3_ttf from pkg-config |
 | Other libraries | none | ffmpeg (avfilter, avformat, avcodec, avdevice, avutil), sqlite3 |
-| Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | knobs derived at runtime from the chain text (`rack.c`) |
+| Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
-| UI | fixed 1180x760 panel, sliders and switches, SDL debug text | modal sheet with F-key tabs, knob rows, text editor, filter browser, glyph atlas from SDL3_ttf |
-| Root build | `make build-drone` / `make run-drone`, in CI and packaging | `make build-vsynth` / `make run-vsynth`, in CI and packaging |
+| Controls | fixed 1180x760 panel, hand-placed 104 px sliders, absolute drag only | modal sheet, knob rows with a bar, keyboard nudge with fine and coarse |
 
-The merge on 2026-09-04 moved files but not build systems: each app had grown
-whatever toolchain its own machine happened to have, and CI gated only one of
-them, so nothing forced them together. That is the part P1 and P2 fixed, and CI
-now fails if they drift again. The remaining divergence is deliberate and
-scheduled: P3 and P4.
+Drone Commander now meets D8: its controls are faders from `shared/param` and
+`shared/ui`, on a grid, with reset, three grains, units and full precision.
+vsynth still draws its own knob rows, so the two do not yet look alike. That is
+P4.
 
 ## 4. Decisions
 
@@ -77,244 +71,277 @@ per fresh configure. CI runs on `windows-latest` through `msys2/setup-msys2`
 and installs the same packages a developer does. Release zips ship the exe
 plus the DLLs it links, collected from the toolchain by the package step.
 
-**D2. SDL3 everywhere.** vsynth moves from SDL2 and SDL2_ttf to SDL3 and
-SDL3_ttf. One windowing API means one shared UI layer. Drone Commander already
-targets SDL3, and MSYS2 and Arch both ship SDL3 and SDL3_ttf.
+**D2. SDL3 everywhere.** One windowing API means one shared control surface.
 
 **D3. Root make targets cover every app.** `make` builds everything, `make
-run` starts every app, `make build-drone` and `make build-vsynth` build one,
-`make run-drone` and `make run-vsynth` run one, `make test` runs every test,
-`make package` produces the zips. The per-app targets select a CMake target
-inside the one project; they are not second build trees. Executables land in
-`build/bin/`. The Makefile has POSIX sh recipes and runs from the MSYS2 shell,
-from PowerShell with `C:\msys64\usr\bin` on PATH, and on Linux.
+run` starts every app, `make build-<app>` and `make run-<app>` handle one.
+`make test` runs every test, `make package` produces the zips. The per-app
+targets select a CMake target inside the one project; they are not second
+build trees. Executables land in `build/bin/`.
 
-**D4. Shared code lives in `shared/`, and only code both apps use goes
-there.** The first three libraries, in the order they are extracted:
+**D4. Shared code lives in `shared/`, and only code more than one app uses
+goes there.** The libraries, in the order they are extracted:
 
-1. `shared/param`: the parameter model. Both apps already have one, hidden in
-   a static table and in a derived rack respectively.
-2. `shared/store`: presets and projects in SQLite. vsynth's `project.c` is the
-   starting point; Drone Commander has no persistence and gets presets from
-   this.
-3. `shared/ui`: the control surface drawn with SDL3: the sheet, its modes,
-   knob rows, text, notices.
+1. `shared/param`: the fader and parameter model (D8). Plain C, no SDL.
+2. `shared/ui`: the control surface on SDL3, including how a fader is drawn
+   and driven.
+3. `shared/store`: presets and projects in SQLite.
+4. `shared/link`: the inter-app clock, buses and control plane (D7, D9).
 
-Storage was the suggested first cut. Extracting it forces the parameter model
-out first, because a preset is a list of parameter values, so param and store
-land together.
+**D5. C17 for every app and shared library. No C++.** The root sets it once,
+with compiler extensions on because the apps use POSIX `strdup` and
+`strncasecmp`.
 
-**D5. C17 for every app and shared library. No C++.** The root sets it once for
-everything, with compiler extensions on because the apps use POSIX `strdup`
-and `strncasecmp`.
-
-**D6. Hardware handoff is a document, not code.** When an instrument is
-chosen for hardware, its app gets a `HARDWARE.md`: the topology as blocks, the
-parameter ranges the software settled on, candidate circuits per block, the
-power budget, and the parts strategy (see section 7). The software never grows
-a firmware target.
+**D6. Everything under `apps/` is an app.** Not an instrument, not a synth,
+not a tool. Some make sound, some make pictures, some only route or measure.
+They are peers, they are addressed by name, and the vocabulary is uniform in
+code, docs and UI.
 
 **D7. Apps share a control plane, not a process or audio callback.** The native
 link protocol will use OSC-compatible UDP messages over localhost or LAN with
-stable paths and monotonic timestamps. It carries transport state, clock/phase,
-LFO reset and parameter changes. Each app receives packets on a network thread
-and forwards bounded events to its real-time engine; no socket call occurs on
-an audio callback. MIDI clock/control, PipeWire and JACK are adapters at the
-edge. Audio and video routing remain separate concerns.
+stable paths and monotonic timestamps. It carries transport state, clock
+phase, resets and parameter changes. Each app receives packets on a network
+thread and forwards bounded events to its real-time engine; no socket call
+occurs on an audio callback. MIDI clock and control, PipeWire and JACK are
+adapters at the edge, never the internal protocol.
+
+**D8. The fader is the lab's control.** Every continuous parameter in every
+app is a fader, specified in section 6. It resets to a neutral, it shows its
+value at full precision, it moves coarse, fine and ultra-fine, and it carries
+a stable address so a preset, a MIDI CC or a sequencer step can drive it
+without the app knowing which. Switches and enum steppers are the only other
+control kinds; there are no bespoke widgets.
+
+**D9. Signal conventions, fixed once for the whole lab.**
+
+- **Audio and modulation are bipolar, nominally -1 to +1.** A level or depth
+  control that can invert is a bipolar fader with neutral 0. This is why an
+  LFO level runs -1 to +1 rather than 0 to 1: negative is the same amount of
+  modulation, inverted.
+- **Clocks are ramps, not pulses.** A clock carries a phase that runs 0 to 1
+  and wraps. An app that wants an edge finds it by detecting the wrap; an app
+  that wants position uses the ramp directly. A missed packet costs precision,
+  never a beat.
+- **Connections are named.** Signals between apps travel on named buses, not
+  on device indices, so a patch is a set of names and can be reasoned about
+  in text.
+
+**D10. Hardware is parked.** Nothing in the current plan depends on it, no app
+is designed around it, and no phase before it. Section 9 keeps what was
+already decided so it is not lost. The power topology is explicitly an open
+sore and is not to be designed until the software says what the circuit has to
+do.
 
 ## 5. Shared architecture
 
 ### 5.1 `shared/param`
 
-Plain C, no SDL, no SQLite, unit-testable offline.
-
-```c
-typedef enum { PARAM_NUMBER, PARAM_ENUM, PARAM_SWITCH } ParamKind;
-
-typedef struct Param {
-    char        group[32];   /* module or section: "osc1", "rot"            */
-    char        key[32];     /* stable id inside the group: "freq", "angle"  */
-    char        label[24];   /* what the player reads                        */
-    ParamKind   kind;
-    double      min, max, step, neutral;
-    const char *unit;        /* "Hz", "", or NULL                            */
-    const char *const *names;/* enum value names, kind == PARAM_ENUM         */
-    int         nnames;
-} Param;
-
-typedef struct ParamSet {
-    Param  *defs; double *values; int *enabled; int n;
-    int     sel;
-} ParamSet;
-```
-
-Operations both apps implement today and will call instead: select next and
-previous, nudge with fine and coarse factors, reset one and reset all,
-randomize with a depth, format a value (enum name or number), describe the
-selection in one line. The app supplies an `apply(group, key, value)` callback:
-Drone Commander writes into `SynthParameters` and publishes it to the audio
-thread, vsynth sends an `avfilter_graph_send_command`.
+Plain C, no SDL, no SQLite, unit-testable offline. Holds the fader (section 6),
+switches, enum steppers, and a set of them with a selection. The app supplies
+an apply callback: Drone Commander writes into `SynthParameters` and publishes
+it to the audio thread, vsynth sends an `avfilter_graph_send_command`.
 
 How the current code maps onto it:
 
 | Today | Becomes |
 |---|---|
-| `Control` rows in `panel.c` (id, label, min, max, step) | `Param` rows, group = oscillator or section |
-| `SynthParameters` | stays; it is the DSP engine's view, filled from the ParamSet |
-| `KnobDef` in `rack.c` (label, opt, min, max, neutral, step, enum unit) | `Param`, group = filter instance name, key = option name |
-| `ModuleDef.bypassable` / `enabled[]` | `PARAM_SWITCH` per module, or the `enabled` array |
+| `Control` rows in `panel.c` | fader and switch definitions, grouped by section |
+| `SynthParameters` | stays; it is the DSP engine's view, filled from the set |
+| `KnobDef` in `rack.c` | a fader, group = filter instance name, key = option name |
+| `ModuleDef.bypassable` / `enabled[]` | a switch per module |
 
-### 5.2 `shared/store`
+### 5.2 `shared/ui`
 
-SQLite through the system library. vsynth's schema, generalized so a preset is
-keyed by `(group, key)` and an instrument is any app:
+SDL3 only. Owns the sheet (frame, header, footer), modes and the rule that one
+mode owns the keyboard, the fader widget in both orientations, text through a
+glyph atlas, notices, and one palette. Each app keeps its own picture: the
+oscilloscope and meter in Drone Commander, the video and taps in vsynth.
+
+### 5.3 `shared/store`
+
+SQLite. vsynth's schema generalized so a preset is keyed by `(group, key)`,
+which is the fader's address, and an app is any app:
 
 ```
 project      id=1, name, schema_version
-instrument   id, app, position, name, definition   -- definition: chain text for vsynth,
-                                                   -- empty or a topology name for drone
-preset       id, instrument_id, slot 1..10, name
+app_state    app, key, value                     -- geometry, fps, last patch
+patch        id, app, position, name, definition -- chain text, or a topology name
+preset       id, patch_id, slot 1..10, name
 preset_value preset_id, grp, key, value
-preset_enable preset_id, grp, enabled
-setting      app, key, value                       -- geometry, fps, last instrument
+preset_flag  preset_id, grp, key, on
 ```
-
-The default project file stays per app in the per-user data folder
-(`%APPDATA%\avsynth\<app>.db`, `~/.local/share/avsynth/<app>.db`), one file
-per app, one schema. vsynth's existing `default.vsynth` files migrate on open.
-
-### 5.3 `shared/ui`
-
-SDL3 only. Owns the sheet (frame, header with F-key tabs and status, footer
-hints), modes and the rule that one mode owns the keyboard, knob rows with
-bars driven by a ParamSet, text through a glyph atlas (SDL3_ttf, system
-monospace font, debug-text fallback), notices, a shared palette. Each app
-keeps its own picture: the oscilloscope and VU meter in Drone Commander, the
-video and tap thumbnails in vsynth. Apps add modes for what is theirs (chain
-editor, filter browser, project view).
 
 ### 5.4 Boundaries that do not move
 
-- A DSP engine depends on nothing in `shared/` except `param` definitions, and
-  never on SDL, SQLite or ffmpeg.
-- The audio callback rules in `AGENTS.md` apply unchanged: no allocation, I/O,
-  logging, locking or graph rebuilding on the audio thread.
+- A DSP engine depends on nothing in `shared/` except parameter definitions,
+  and never on SDL, SQLite or ffmpeg.
+- The audio callback rules in `AGENTS.md` apply unchanged.
 - `shared/ui` never talks to `shared/store`; the app wires them.
 
-## 6. Phases
+## 6. The fader
 
-Each phase ends in a commit on `main` that leaves both apps building and
-their tests passing.
+One control, shared by every app. This section is the specification; `shared/param`
+and `shared/ui` implement it and nothing else defines a continuous control.
 
-**P0. Decisions and documents. Done 2026-09-04.** This roadmap; a root README
-that describes the repository instead of pasting an app's README; repo-wide
-`AGENTS.md`.
+**Identity.** A fader is addressed by `group` and `key`, both stable strings.
+That address is what a preset row, a MIDI binding and a sequencer target all
+use, so none of them needs to know the app's internals or the fader's screen
+position.
+
+**Value.** `min`, `max`, and a `neutral`. The neutral is what reset returns to:
+the value that makes the control stop acting where there is one, such as a
+bipolar depth's zero, and the patch default where there is not, such as a
+frequency. A bipolar fader's bar fills outward from its neutral so an inverted
+setting reads at a glance; every other fader fills from its minimum and marks
+the neutral with a tick, because filling a frequency outward from 110 Hz would
+read as nonsense.
+
+**Taper.** How the track position maps to the value.
+
+- *Linear* for levels, depths and anything already perceptually even.
+- *Exponential* for frequencies, so a track is useful at both ends. This is
+  what makes a 20 Hz to 12 kHz cutoff dialable instead of a cliff.
+- *Bipolar* for signed controls: symmetric about the neutral, with the two
+  halves tapered independently so both directions feel the same.
+
+**Movement, three grains.** Every fader has a coarse, a fine and an ultra-fine
+step, defaulted from the range to round numbers and overridable per fader.
+The gestures are the same everywhere:
+
+| Gesture | Effect |
+|---|---|
+| Drag the track | absolute, follows the pointer, the coarse grain |
+| Wheel | one fine step |
+| Ctrl + wheel | one coarse step |
+| Shift + wheel | one ultra-fine step |
+| Middle click, or double click | reset to neutral |
+| Arrows, when selected | one fine step; Ctrl coarse, Shift ultra-fine |
+| Backspace, when selected | reset to neutral |
+
+**Readout.** The value is always visible, with its unit, at a precision derived
+from the ultra-fine step, so the smallest possible movement is always visible
+in the number. No fader ever shows fewer digits than it can be moved by.
+
+**Designed for, not built yet.** The address plus min, max and taper is
+everything a 7-bit MIDI CC or a 14-bit NRPN needs to map onto a fader, and
+everything a sequencer step needs to write into one. A fader does not know
+whether a human, a CC or a step moved it.
+
+## 7. Apps the lab is heading towards
+
+Direction, not a work queue. Written down because the shared pieces have to be
+designed with these in mind, and because an earlier SuperCollider version of
+this lab was lost. None of them is scheduled.
+
+- **MONITOR.** The only app that talks to the speakers. A level fader, a
+  visualizer, and recording to file. Everything else outputs to a named bus
+  and is silent until MONITOR is running. This is what makes named buses
+  (D9) worth having and keeps output level in exactly one place.
+- **CLOCK.** A master BPM with derived faster and slower ramps, each a named
+  bus carrying phase 0 to 1 per D9. Tempo can be nudged while running so it
+  can be synced up by ear against something already playing. No pulses.
+- **SEQUENCER.** A row of vertical faders, each a bipolar value, which is a
+  window into a buffer rather than a fixed number of steps: the count can be
+  doubled or halved. Takes a clock ramp in and outputs the fader under the
+  playhead. Because the output is just a signal, the same app is a step
+  sequencer for a cutoff at slow rates and a wavetable or sample player at
+  audio rates. This is the strongest argument for the fader being one shared,
+  addressable, MIDI-mappable thing rather than per-app widgets.
+- **A filter app** in the spirit of the parts of a Sherman Filterbank that
+  actually got used: gain into a high-pass into a low-pass. No amplitude
+  envelope, no cutoff envelope.
+- **A kick drum app.** Crude on purpose.
+
+Why not SuperCollider, where much of this existed before: deployment is a
+single static executable here, the result is stable, and writing the DSP
+directly is now practical.
+
+## 8. Phases
+
+Each phase ends in a commit on `main` that leaves every app building and its
+tests passing.
+
+**P0. Decisions and documents. Done 2026-09-04.**
 
 **P1. One toolchain, one set of root commands. Done 2026-09-04.**
-- `CMakePresets.json` with `ucrt64`, `linux` and `release` presets, Ninja.
-- Root `CMakeLists.txt` builds both apps unconditionally, sets C17 for
-  everything, finds SDL3 and SDL3_ttf once through pkg-config, shares one
-  warning set through the `avsynth_flags` interface target, and puts every
-  executable in `build/bin/`. Drone Commander's FetchContent of SDL3 is gone.
-  SDL3's pkg-config `-mwindows` is stripped so each app picks its subsystem.
-- Root Makefile per D3, which prepends `/ucrt64/bin` to PATH so the same
-  commands work from PowerShell and from the MSYS2 shell.
-- `tools/package.sh` zips each app with the DLLs it links. It reads the import
-  table with `objdump`, not `ldd`: ldd resolves by loading the image, so it
-  depends on PATH being in a form the Windows loader accepts, which is not
-  true when make is started from PowerShell.
-- CI on `msys2/setup-msys2` in the UCRT64 environment, building, testing and
-  packaging both apps; the release job uploads both zips.
-- Verified: `make`, `make help`, `make test` and `make package` from
-  PowerShell; the packaged vsynth passes `--selftest` on a PATH holding only
-  the Windows system directories, so the bundle is self-contained.
+- `CMakePresets.json`, one root CMake project building both apps, C17 and SDL3
+  from pkg-config for everything, executables in `build/bin/`.
+- Root Makefile per D3, prepending `/ucrt64/bin` to PATH so the same commands
+  work from PowerShell and the MSYS2 shell.
+- `tools/package.sh` zips each app with the DLLs it links, read from the
+  import table with `objdump` rather than `ldd`.
+- CI on `msys2/setup-msys2`, building, testing and packaging both apps.
 
-**P2. vsynth on SDL3. Done 2026-09-04.** `window.c`, `hud.c`, `editor.c`,
-`help.c`, `picker.c`, `options.c`, `main.c` and `voice.c` moved to SDL3 and
-SDL3_ttf. What the port turned on:
-- Layout stays in integer `SDL_Rect`; `hud_frect()` converts at the draw call,
-  because SDL3 renders in floats.
-- Text input needs a window, so it goes through `hud_text_input()`, which asks
-  the renderer for its window.
-- `SDL_TICKS_PASSED` is gone and ticks are 64-bit: tick fields are `Uint64`
-  and comparisons are plain.
-- vsync is a renderer property (`SDL_SetRenderVSync`), scale quality is a
-  texture property, fullscreen is a bool, displays are enumerated by id, and
-  `SDL_RenderReadPixels` returns a new surface.
-- Letter keycodes are uppercase (`SDLK_Q`). Digit presets still bind by
-  scancode, so AZERTY keeps working.
-- Verified: `vsynth --selftest` reports `OK (0 failures)`, covering derived
-  knobs, the enum knob, rejection of a broken chain, preset round-trip,
-  chain rename and delete, and a voice restart on a new capture size.
-  `tools/uitest.ps1` now defaults to `build/bin/vsynth.exe`; it has not been
-  re-run since the port.
+**P2. vsynth on SDL3. Done 2026-09-04.** Integer `SDL_Rect` layout converted at
+the draw call, text input through the renderer's window, `Uint64` ticks,
+per-texture scale mode, bool returns, uppercase letter keycodes with preset
+digits still by scancode. `vsynth --selftest` reports OK with 0 failures.
+A later pass made the hit-testing pixel-density independent.
 
-**P3. `shared/param` and `shared/store`.**
-- Extract the parameter model; `rack.c` derives Params from the graph,
-  `panel.c` declares Params in its table. Nudge, reset, randomize and format
-  come from `shared/param`. Unit tests in `shared/param/tests`.
-- Move `project.c` to `shared/store` with the generalized schema and a
-  migration for existing project files.
-- Drone Commander gets a project file and ten preset slots on the digit row
-  (scancodes, so AZERTY works), save with Shift, like vsynth.
-- Exit: both apps save and load presets through the same code; vsynth
-  selftest still round-trips a preset.
+**P3. The fader, and Drone Commander redesigned on it. Done 2026-09-04.**
+- `shared/param`: the fader per section 6, plus switches and enum steppers.
+  `param_tests` covers taper round-trips, the geometric midpoint of the
+  exponential taper, bipolar symmetry, snapping onto the neutral, the three
+  grains, clamping, NaN, readout precision and the set operations. It runs
+  under `make test` with no window and no audio device.
+- `shared/ui`: the fader on SDL3, horizontal, with the vertical orientation
+  implemented for the sequencer to come, and the gesture table in one place.
+  Text arrives through a `UiText` callback so the apps need not agree on a font.
+- Drone Commander: LFO level is bipolar -1 to +1 per D9, and the summing now
+  weights by magnitude, which it had to before a negative level was reachable.
+  The panel is on a two-row grid with one accent colour; every continuous
+  control is a fader with a unit, a neutral tick and an exponential taper where
+  it is a frequency. `assets/screenshots/drone-commander.png` is the result.
+- The old panel's specific faults, for the record: the FM cascade slider
+  crossed the oscillator section border, the anti-alias label overflowed it,
+  five sections each had their own title colour, the VCA and output sections
+  held one control apiece in a mostly empty box, and a 104 px track spanning
+  20 Hz to 12 kHz put 115 Hz in a pixel with no reset and no fine grain.
 
-**P4. `shared/ui`.** Move the sheet, modes, slider/control rows, glyph atlas and
-notices out of vsynth's `hud.c`. Drone Commander's panel becomes slider rows in
-the sheet plus its own oscilloscope area, with the same keys as vsynth: Tab to
-select, arrows to nudge, Space to toggle, F-keys for modes, F12 screenshot.
-Exit: both apps look and drive the same, per-app code is only what differs.
+**P4. vsynth on the shared fader.** `rack.c` produces faders instead of
+`KnobDef`s and `hud.c` draws them with `shared/ui`, so both apps' controls
+look and behave identically. Exit: the two apps side by side are recognisably
+the same instrument family, and `--selftest` still passes.
 
-**P5. Hardware handoff.** `HARDWARE.md` template and the first one for Drone
-Commander: blocks (3 VCO, mixer with soft clip, VCF, VCA, 3 square LFO with
-sync), ranges taken from the Param table, candidate circuits, USB-C input and
-internal rail power budget, 3.5 mm output stage, JLCPCB part picks. Also the point where the parts
-strategy in section 7 gets tested against a real BOM.
+**P5. `shared/store`.** vsynth's `project.c` becomes `shared/store` with the
+generalized schema keyed on the fader address, plus a migration for existing
+project files. Drone Commander gains a project file and ten preset slots on
+the digit row by scancode. Exit: both apps save and load presets through the
+same code.
 
-**P6. Cross-app clock and modulation link.** Define the OSC-compatible message
-schema and monotonic timestamp model, then implement a UDP control thread and
-bounded event queue in both apps. First acceptance test: two Drone Commander
-processes share transport and LFO resets without phase depending on packet
-arrival jitter. Second: vsynth maps received controls to its runtime parameter
-model. Add MIDI clock and PipeWire/JACK adapters only after the native protocol
-is deterministic and observable.
+**P6. `shared/link`, the clock and buses.** Define the OSC-compatible message
+schema and the monotonic timestamp model, then a UDP control thread and
+bounded event queue. Clocks are ramps per D9. First acceptance test: two apps
+share transport and resets without phase depending on packet arrival jitter.
 
-**Later, in no order.** MIDI learn on the Param model (RtMidi or PortMidi;
-every Param already has min, max and step, so a 7-bit CC maps with no extra
-data), host-side modulators for vsynth, a control surface in a second window,
-new benches for new instrument ideas, an Arch build check.
+**Later, in no order.** MIDI learn onto fader addresses; the apps in section 7;
+host-side modulators for vsynth; a control surface in a second window; an Arch
+build check.
 
-## 7. Hardware constraints to design against
+## 9. Parked: hardware
 
-Starting rules, to be corrected by the first real board:
+Kept so it is not lost. Nothing depends on it and no phase before P6 touches
+it. Revisit only when the software has settled what a circuit would have to do.
 
-- **Assembly service:** JLCPCB PCBA. Prefer parts from their Basic and
-  Preferred libraries to avoid per-part feeder fees; check availability before
-  committing a topology to a part.
-- **Hand soldering budget:** panel parts only. Pots, jacks and switches are
-  through-hole or panel-mount and wired; everything else is SMT on the board.
-- **Power:** USB-C receptacle as a 5 V sink, with correct CC resistors and input
-  protection. Bipolar or higher-voltage analog rails come from filtered on-board
-  conversion. Validate available current, converter noise, headroom and thermal
-  behavior before selecting the circuit.
-- **Output:** 3.5 mm audio jack with an output buffer, AC coupling where needed,
-  safe level limiting and protection appropriate to line or headphone use.
-- **Enclosures:** desktop boxes. Panel layout and board outline are designed
-  per box, not per rack standard. A eurorack variant is a different panel and
-  power header on the same board, if ever.
-- **Signal levels:** decide once (line level for desktop, eurorack level only
-  on a eurorack variant) and document it in each `HARDWARE.md`.
+The intent was: boards made for assembly rather than soldering, sent to a PCBA
+service with every SMT part machine-placed and hand soldering reserved for
+panel parts; small desktop boxes rather than a rack standard; and the analog
+versions staying fully analog, with the software as the sketchbook that settles
+topology, ranges and feel but never becoming firmware.
 
-## 8. Open questions
+**Power is unresolved and disliked.** A USB-C 5 V input with analog rails made
+on board was the last idea, and it is not settled. Do not design it, do not
+propose a topology, and do not let an app's design depend on it.
 
-To settle with the user before the phase that needs them:
+## 10. Open questions
 
-1. Which USB-C rail topology best meets the measured headroom and noise budget:
-  virtual ground, boosted single rail or generated bipolar rails. Needed by P5.
-2. Which instrument goes to hardware first. Drone Commander is the obvious
-   candidate; needed by P5.
-3. Whether the per-app project files should merge into one lab-wide file
-   later. Not needed before P3 ships one schema.
-4. Whether Drone Commander keeps its fixed panel geometry as a second mode
-   after P4, or the sheet replaces it entirely.
+To settle before the phase that needs them:
+
+1. Whether Drone Commander keeps a spatially arranged panel after P3 or moves
+   to vsynth's row-based sheet. P3 assumes it keeps a panel, because the
+   oscilloscope and the section grouping carry meaning that rows would lose.
+2. Whether per-app project files merge into one lab-wide file. Not needed
+   before P5 ships one schema.
+3. What the sequencer's buffer window means at audio rate: sample count per
+   fader, interpolation between faders, and where a buffer comes from.
+   Needed before section 7's SEQUENCER, not before.

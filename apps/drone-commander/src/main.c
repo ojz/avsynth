@@ -4,6 +4,8 @@
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
 #define SAMPLE_RATE 48000
 #define AUDIO_CHUNK_FRAMES 1024
@@ -62,16 +64,25 @@ static void SDLCALL provide_audio(void *userdata, SDL_AudioStream *stream,
     }
 }
 
-static void set_audio(SDL_AudioStream *stream, SDL_Window *window,
-                      bool *audio_enabled, bool enabled)
+static void set_audio(SDL_AudioStream *stream, bool *audio_enabled, bool enabled)
 {
     if (stream == NULL) return;
-    if (enabled && SDL_ResumeAudioStreamDevice(stream)) {
-        *audio_enabled = true;
-        SDL_SetWindowTitle(window, "Drone Commander - AUDIO LIVE");
-    } else if (!enabled && SDL_PauseAudioStreamDevice(stream)) {
-        *audio_enabled = false;
-        SDL_SetWindowTitle(window, "Drone Commander - HARD MUTED");
+    if (enabled && SDL_ResumeAudioStreamDevice(stream)) *audio_enabled = true;
+    else if (!enabled && SDL_PauseAudioStreamDevice(stream)) *audio_enabled = false;
+}
+
+/* The title carries the selected control and its value, so a precise setting
+ * can be read even while the pointer is somewhere else. */
+static void refresh_title(SDL_Window *window, const PanelState *panel, bool audio_enabled)
+{
+    static char last[256] = "";
+    char selection[128], title[256];
+    panel_describe_selection(panel, selection, sizeof selection);
+    snprintf(title, sizeof title, "Drone Commander  %s  %s",
+             audio_enabled ? "AUDIO LIVE" : "HARD MUTED", selection);
+    if (strcmp(title, last) != 0) {
+        SDL_SetWindowTitle(window, title);
+        snprintf(last, sizeof last, "%s", title);
     }
 }
 
@@ -83,21 +94,22 @@ int main(void)
     SDL_AudioSpec audio_spec = {SDL_AUDIO_F32, 1, SAMPLE_RATE};
     SDL_Event event;
     SynthParameters parameters = synth_default_parameters();
-    ControlQueue controls = {.read_index = ATOMIC_VAR_INIT(0U), .write_index = ATOMIC_VAR_INIT(0U)};
+    ControlQueue controls = {.read_index = 0U, .write_index = 0U};
     AudioContext audio_context = {0};
-    PanelState panel = {0};
+    PanelState panel;
     Synth preview;
     bool running = true;
     bool audio_enabled = false;
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) return 1;
-    if (!SDL_CreateWindowAndRenderer("Drone Commander - HARD MUTED", PANEL_WIDTH, PANEL_HEIGHT,
+    if (!SDL_CreateWindowAndRenderer("Drone Commander  HARD MUTED", PANEL_WIDTH, PANEL_HEIGHT,
                                      0, &window, &renderer)) {
         SDL_Log("Window creation failed: %s", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
+    panel_init(&panel, &parameters);
     synth_init(&preview, SAMPLE_RATE, &parameters);
     synth_init(&audio_context.synth, SAMPLE_RATE, &parameters);
     audio_context.controls = &controls;
@@ -107,28 +119,41 @@ int main(void)
 
     while (running) {
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) running = false;
-            else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT) {
-                bool audio_clicked = false;
-                if (panel_mouse_down(&panel, &parameters, event.button.x, event.button.y, &audio_clicked))
-                    publish_controls(&controls, &parameters);
-                if (audio_clicked) set_audio(audio_stream, window, &audio_enabled, !audio_enabled);
-            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) panel_mouse_up(&panel);
-            else if (event.type == SDL_EVENT_MOUSE_MOTION &&
-                     panel_mouse_motion(&panel, &parameters, event.motion.x)) {
-                publish_controls(&controls, &parameters);
-            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
-                if (event.key.key == SDLK_ESCAPE) running = false;
-                else if (event.key.key == SDLK_SPACE) set_audio(audio_stream, window, &audio_enabled, false);
-                else if (event.key.key == SDLK_A && (event.key.mod & SDL_KMOD_CTRL) &&
-                         (event.key.mod & SDL_KMOD_SHIFT)) set_audio(audio_stream, window, &audio_enabled, true);
-                else if (event.key.key == SDLK_R) {
+            bool audio_clicked = false;
+
+            if (event.type == SDL_EVENT_QUIT) { running = false; break; }
+
+            /* App-level keys first, so the panel never sees them. Repeats are
+             * ignored here but passed to the panel, where holding an arrow to
+             * nudge is exactly what you want. */
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+                SDL_Keymod mod = SDL_GetModState();
+                if (event.key.key == SDLK_ESCAPE) { running = false; break; }
+                if (event.key.key == SDLK_SPACE) {
+                    set_audio(audio_stream, &audio_enabled, false);
+                    continue;
+                }
+                if (event.key.key == SDLK_A && (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT)) {
+                    set_audio(audio_stream, &audio_enabled, true);
+                    continue;
+                }
+                if (event.key.key == SDLK_R && !(mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT))) {
                     parameters = synth_default_parameters();
+                    panel_from_parameters(&panel, &parameters);
                     publish_controls(&controls, &parameters);
+                    continue;
                 }
             }
+
+            if (panel_handle_event(&panel, &event, &audio_clicked)) {
+                panel_to_parameters(&panel, &parameters);
+                publish_controls(&controls, &parameters);
+            }
+            if (audio_clicked) set_audio(audio_stream, &audio_enabled, !audio_enabled);
         }
-        panel_render(renderer, &preview, &parameters, &panel, audio_enabled);
+
+        refresh_title(window, &panel, audio_enabled);
+        panel_render(renderer, &panel, &preview, audio_enabled);
         SDL_Delay(16);
     }
 

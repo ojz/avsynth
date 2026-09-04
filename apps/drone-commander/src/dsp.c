@@ -117,8 +117,12 @@ void synth_set_parameters(Synth *synth, const SynthParameters *parameters)
 
     for (lfo_index = 0; lfo_index < SYNTH_LFO_COUNT; ++lfo_index) {
         synth->lfos[lfo_index].frequency = clampf(parameters->lfos[lfo_index].frequency, 0.01f, 30.0f);
+        /* The oscillator runs at unity; the bipolar level is applied where the
+         * LFOs are summed, so it can invert as well as scale. */
         synth->lfos[lfo_index].amplitude = 1.0f;
         synth->lfos[lfo_index].waveform = WAVE_SQUARE;
+        synth->parameters.lfos[lfo_index].amplitude =
+            clampf(parameters->lfos[lfo_index].amplitude, -1.0f, 1.0f);
     }
 }
 
@@ -203,7 +207,12 @@ float synth_process_sample(Synth *synth)
         lfo_signal = oscillator_process_ex(&synth->lfos[lfo_index], synth->sample_rate, 0.0f, 0);
         previous_wrapped = synth->lfos[lfo_index].phase < phase_before;
         modulation += lfo_signal * synth->smoothed_lfo_amplitudes[lfo_index];
-        modulation_weight += synth->smoothed_lfo_amplitudes[lfo_index];
+        /* Weight by magnitude. An LFO level is bipolar (ROADMAP D9), so a
+         * negative level inverts that LFO's contribution while still counting
+         * as modulation depth. Summing the signed levels instead would let two
+         * opposed LFOs cancel the weight to zero and skip the normalisation,
+         * leaving the modulation at twice its intended depth. */
+        modulation_weight += fabsf(synth->smoothed_lfo_amplitudes[lfo_index]);
     }
     if (modulation_weight > 1.0f) {
         modulation /= modulation_weight;

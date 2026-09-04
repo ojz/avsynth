@@ -1,8 +1,23 @@
 # avsynth agent instructions
 
 Read [ROADMAP.md](ROADMAP.md) first. It holds the vision, the decisions
-(numbered D1 to D7) and the phases. Do not re-decide what it decides; if a
+(numbered D1 to D10) and the phases. Do not re-decide what it decides; if a
 decision has to change, change it there in the same commit.
+
+Two things it decides that shape almost every change:
+
+- **Everything under `apps/` is an app** (D6). Not an instrument, not a synth,
+  not a tool. Uniform vocabulary in code, docs and UI.
+- **Every continuous control is a fader** (D8), specified in ROADMAP section 6
+  and implemented once in `shared/param` and `shared/ui`. Never write a bespoke
+  slider, and never invent a gesture: a fader resets to its neutral, shows its
+  value at full precision with its unit, and moves coarse on drag, fine on the
+  wheel, coarse on ctrl+wheel and ultra-fine on shift+wheel.
+- **Signals agree** (D9). Audio and modulation are bipolar, nominally -1 to +1,
+  so a depth that can invert is a bipolar fader with neutral 0. Clocks are
+  ramps of phase 0 to 1, never pulses. Connections between apps are named.
+- **Hardware is parked** (D10). Do not design circuits, do not propose a power
+  topology, and do not let an app's design depend on either.
 
 ## Git workflow
 
@@ -16,8 +31,9 @@ decision has to change, change it there in the same commit.
 
 - One instrument per directory under `apps/`. Each app is self-contained: its
   own README, sources under `src/`, tests under `tests/`.
-- `shared/` holds code that at least two apps genuinely use. Extract, do not
-  pre-build: the order is `param`, `store`, `ui` (ROADMAP D4).
+- `shared/` holds code that more than one app genuinely uses. Extract, do not
+  pre-build: the order is `param`, `ui`, `store`, `link` (ROADMAP D4).
+  `shared/param` is plain C and testable offline; keep it that way.
 - Docs live next to what they describe: app READMEs for controls and signal
   paths, `apps/video-synth/PRD.md` for vsynth's design,
   `apps/video-synth/CLAUDE.md` for vsynth's environment and code rules,
@@ -92,9 +108,12 @@ Signal path, extended in small audible steps:
   their limits next to the code.
 - `tanhf` is the soft-saturation primitive. Do not call it an analog model.
 - Oversample nonlinear stages only after tests or listening show the need.
-- Continuous on-screen parameters use mouse-friendly sliders. Each bipolar
-  square LFO has a red/green phase indicator: red for negative, green for
-  positive.
+- An LFO level is a bipolar fader running -1 to +1, so a negative level is the
+  same depth inverted. Where LFO outputs are summed, weight them by magnitude:
+  summing signed levels lets two opposed LFOs cancel the normalising weight and
+  leave the modulation at twice its intended depth.
+- Each square LFO shows its phase as one bar split where the sign changes, red
+  on the negative half and green on the positive, with the live half lit.
 
 Real-time rules for the audio callback, without exception:
 
@@ -125,17 +144,17 @@ code rules. The rules that must survive any refactor:
 - `vsynth --selftest` must keep passing. Run it after touching graph, rack,
   project or voice code, with `--project` pointing at a scratch file.
 
-## Hardware boundary (all instruments)
+## Hardware boundary
 
-When discussing or designing hardware, use analog building blocks: VCOs,
-op-amp or passive mixers, VCFs, VCAs or OTAs, comparator-based LFOs,
-transistor, diode, OTA or op-amp saturation stages. Account for tolerances,
-noise, headroom, tracking, stability, power rails and safe signal levels.
+Hardware is parked (ROADMAP D10 and section 9). There is a lot of software
+experimentation to do first, nothing in the plan depends on a circuit, and the
+power question is explicitly unsettled and not to be worked on.
 
-Design for the constraints in ROADMAP section 7: machine-assembled SMT boards,
-hand soldering only for panel parts, USB-C 5 V power input with required analog
-rails generated on board, 3.5 mm audio output and desktop enclosures.
+So: do not design circuits, do not propose a power topology, do not add a
+firmware target, and do not let an app's design bend around an imagined board.
+If hardware comes up, say it is parked and carry on with the software.
 
-Do not pick a circuit because it resembles the digital implementation. Every
-circuit is evaluated as an analog design and validated by simulation,
-breadboarding, measurement and listening.
+When it is eventually unparked, the rules already recorded apply: analog
+building blocks evaluated as analog designs in their own right, validated by
+simulation, breadboarding, measurement and listening, never chosen because
+they resemble the digital implementation.
