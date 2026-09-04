@@ -474,9 +474,17 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
 {
     if (h->mode != MODE_PANEL) return 0;
 
+    /* The rows were laid out in renderer output pixels, but SDL3 reports mouse
+     * positions in window coordinates. The two differ on a display whose pixel
+     * density is above 1, which would put every row's clickable area away from
+     * where it is drawn. Convert first; at density 1 this changes nothing. */
+    SDL_Event converted = *ev;
+    SDL_ConvertEventToRenderCoordinates(h->ren, &converted);
+    ev = &converted;
+
     switch (ev->type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-        int mx = ev->button.x, my = ev->button.y;
+        int mx = (int)ev->button.x, my = (int)ev->button.y;
         if (!in_rect(mx, my, &h->panel)) return 0;
         if (ev->button.button != SDL_BUTTON_LEFT) return 0;   /* right-drag resizes, even over the panel */
         const Row *row = row_at(h, mx, my);
@@ -492,19 +500,23 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
         return 1;
     }
     case SDL_EVENT_MOUSE_MOTION:
-        if (h->drag_control < 0) return in_rect(ev->motion.x, ev->motion.y, &h->panel);
+        if (h->drag_control < 0) return in_rect((int)ev->motion.x, (int)ev->motion.y, &h->panel);
         for (int i = 0; i < h->nrows; i++)
             if (h->rows[i].control == h->drag_control) {
-                set_from_bar(rack, voice, &h->rows[i], ev->motion.x);
+                set_from_bar(rack, voice, &h->rows[i], (int)ev->motion.x);
                 break;
             }
         return 1;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (h->drag_control >= 0) { h->drag_control = -1; return 1; }
-        return ev->button.button == SDL_BUTTON_LEFT && in_rect(ev->button.x, ev->button.y, &h->panel);
+        return ev->button.button == SDL_BUTTON_LEFT &&
+               in_rect((int)ev->button.x, (int)ev->button.y, &h->panel);
     case SDL_EVENT_MOUSE_WHEEL: {
-        float fmx, fmy;
-        SDL_GetMouseState(&fmx, &fmy);   /* floats in SDL3; the rows are integer */
+        /* The wheel event carries no usable position, so ask for the pointer.
+         * That answer is in window coordinates and needs the same conversion. */
+        float wx, wy, fmx, fmy;
+        SDL_GetMouseState(&wx, &wy);
+        SDL_RenderCoordinatesFromWindow(h->ren, wx, wy, &fmx, &fmy);
         int mx = (int)fmx, my = (int)fmy;
         const Row *row = row_at(h, mx, my);
         if (!row) return in_rect(mx, my, &h->panel);

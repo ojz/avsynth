@@ -37,8 +37,15 @@ static void draw(SDL_Renderer *ren, const SDL_Rect *desk, const SDL_Rect *r, int
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
     if (r && r->w > 0 && r->h > 0) {
-        SDL_FRect loc = { (float)(r->x - desk->x), (float)(r->y - desk->y),
-                          (float)r->w, (float)r->h };
+        /* desk and r are desktop coordinates, the same space as the window;
+         * the renderer draws in output pixels. Convert both corners so the
+         * outline lands on the region the user is dragging out even when the
+         * pixel density is above 1. */
+        float x0, y0, x1, y1;
+        SDL_RenderCoordinatesFromWindow(ren, (float)(r->x - desk->x), (float)(r->y - desk->y), &x0, &y0);
+        SDL_RenderCoordinatesFromWindow(ren, (float)(r->x - desk->x + r->w),
+                                        (float)(r->y - desk->y + r->h), &x1, &y1);
+        SDL_FRect loc = { x0, y0, x1 - x0, y1 - y0 };
         SDL_SetRenderDrawColor(ren, 255, 40, 40, live ? 70 : 35);
         SDL_RenderFillRect(ren, &loc);
         SDL_SetRenderDrawColor(ren, 255, 40, 40, 255);
@@ -53,9 +60,12 @@ static void draw(SDL_Renderer *ren, const SDL_Rect *desk, const SDL_Rect *r, int
 int picker_run(const PickRect *prev, PickRect *out)
 {
     SDL_Rect desk = desktop_bounds();
+    /* SDL3 creates a window without a position, so it would appear centred on
+     * the primary display at full desktop size, opaque, before being moved.
+     * Start hidden, place it, set the opacity, then show it. */
     SDL_Window *w = SDL_CreateWindow("vsynth region", desk.w, desk.h,
                                      SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP |
-                                     SDL_WINDOW_UTILITY);
+                                     SDL_WINDOW_UTILITY | SDL_WINDOW_HIDDEN);
     if (!w) {
         fprintf(stderr, "picker: SDL_CreateWindow: %s\n", SDL_GetError());
         return 0;
@@ -70,6 +80,7 @@ int picker_run(const PickRect *prev, PickRect *out)
         return 0;
     }
     SDL_SetRenderVSync(ren, 1);
+    SDL_ShowWindow(w);
     SDL_Cursor *cross = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR);
     SDL_Cursor *old = SDL_GetCursor();
     if (cross) SDL_SetCursor(cross);

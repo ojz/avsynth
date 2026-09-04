@@ -196,9 +196,13 @@ int window_save_bmp(Window *win, const char *path)
         fprintf(stderr, "screenshot: %s\n", SDL_GetError());
         return -1;
     }
+    /* Read the error before destroying the surface: SDL_DestroySurface can
+     * overwrite it, so reporting afterwards prints an unrelated message. */
     int rc = SDL_SaveBMP(s, path) ? 0 : -1;
+    char err[256] = "";
+    if (rc != 0) snprintf(err, sizeof err, "%s", SDL_GetError());
     SDL_DestroySurface(s);
     if (rc == 0) fprintf(stderr, "screenshot saved: %s\n", path);
-    else         fprintf(stderr, "screenshot: %s\n", SDL_GetError());
+    else         fprintf(stderr, "screenshot: %s\n", err);
     return rc;
 }
