@@ -24,14 +24,9 @@ struct Editor {
     int   status_err;
 
     SDL_Rect box, area;   /* whole box; text area */
-    Uint32   blink0;
+    Uint64   blink0;
 };
 
-static const SDL_Color C_TEXT   = { 235, 235, 235, 255 };
-static const SDL_Color C_DIM    = { 150, 150, 150, 255 };
-static const SDL_Color C_TITLE  = { 255, 150,  30, 255 };
-static const SDL_Color C_ERR    = { 255,  90,  90, 255 };
-static const SDL_Color C_OK     = { 120, 220, 120, 255 };
 
 static const char *HINT = "ctrl+enter apply   F1 help on word   esc back   ctrl+a/c/x/v   {W} {H} = capture size";
 
@@ -71,7 +66,7 @@ void editor_open(Editor *e, const char *text, const char *title)
     if (!editor_dirty(e)) editor_load(e, text, title);
     e->open = 1;
     e->blink0 = SDL_GetTicks();
-    SDL_StartTextInput();
+    hud_text_input(e->hud, 1);
 }
 
 static void insert(Editor *e, const char *s);
@@ -107,7 +102,7 @@ void editor_word_at_cursor(const Editor *e, char *buf, size_t cap)
 void editor_close(Editor *e)
 {
     e->open = 0;
-    SDL_StopTextInput();
+    hud_text_input(e->hud, 0);
 }
 
 int         editor_is_open(const Editor *e) { return e->open; }
@@ -242,17 +237,17 @@ int editor_handle_event(Editor *e, const SDL_Event *ev)
     if (!e->open) return EDITOR_NONE;
 
     switch (ev->type) {
-    case SDL_TEXTINPUT:
+    case SDL_EVENT_TEXT_INPUT:
         insert(e, ev->text.text);
         return EDITOR_CONSUMED;
 
-    case SDL_KEYUP:
+    case SDL_EVENT_KEY_UP:
         return EDITOR_CONSUMED;
 
-    case SDL_KEYDOWN: {
+    case SDL_EVENT_KEY_DOWN: {
         SDL_Keymod mod = SDL_GetModState();
-        int ctrl = (mod & KMOD_CTRL) != 0, shift = (mod & KMOD_SHIFT) != 0;
-        switch (ev->key.keysym.sym) {
+        int ctrl = (mod & SDL_KMOD_CTRL) != 0, shift = (mod & SDL_KMOD_SHIFT) != 0;
+        switch (ev->key.key) {
         case SDLK_ESCAPE:
             return EDITOR_CLOSE;
         case SDLK_RETURN:
@@ -277,10 +272,10 @@ int editor_handle_event(Editor *e, const SDL_Event *ev)
         case SDLK_DOWN:  move_line(e, +1, shift); break;
         case SDLK_HOME:  move_to(e, ctrl ? 0 : line_start(e, e->cursor), shift); break;
         case SDLK_END:   move_to(e, ctrl ? e->len : line_end(e, e->cursor), shift); break;
-        case SDLK_a: if (ctrl) { e->anchor = 0; e->cursor = e->len; } break;
-        case SDLK_c: if (ctrl) copy_sel(e); break;
-        case SDLK_x: if (ctrl) { copy_sel(e); if (has_sel(e)) delete_sel(e); } break;
-        case SDLK_v: if (ctrl) paste(e); break;
+        case SDLK_A: if (ctrl) { e->anchor = 0; e->cursor = e->len; } break;
+        case SDLK_C: if (ctrl) copy_sel(e); break;
+        case SDLK_X: if (ctrl) { copy_sel(e); if (has_sel(e)) delete_sel(e); } break;
+        case SDLK_V: if (ctrl) paste(e); break;
         default: break;
         }
         return EDITOR_CONSUMED;

@@ -14,60 +14,68 @@ decisions and the plan.
 | **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with FM cascade, state-variable filter, VCA and three synced square LFOs. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
 | **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Knobs are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
 
-Both are C, both use SDL for window, input and (for audio) the device, both
-build with CMake. They were developed separately and merged on 2026-09-04;
-unifying their toolchain, SDL version and UI is the current work, see the
-roadmap.
+Both are C17 on SDL3, built by one CMake project against system libraries from
+pkg-config. Nothing is vendored or downloaded at configure time, so both
+machines and CI resolve the same libraries from the same packages.
 
 ## Layout
 
 ```text
-apps/drone-commander/   audio drone synth (C17, SDL3)
-apps/video-synth/       video feedback synth (C11, SDL2, ffmpeg, SQLite)
-shared/                 code used by more than one app (empty until phase 3)
+apps/drone-commander/   audio drone synth
+apps/video-synth/       video feedback synth
+shared/                 code used by more than one app (empty until roadmap phase 3)
+tools/package.sh        release packaging: exe plus the DLLs it links
 assets/screenshots/     screenshots per application
-.github/workflows/      CI: Windows build, test, artifacts, tagged releases
+.github/workflows/      CI: build, test, artifacts, tagged releases
 ROADMAP.md              vision, decisions, phases
 AGENTS.md               rules for agents and contributors
 ```
 
-## Building today
+## Toolchain
 
-The only toolchain in use is MSYS2 UCRT64 on Windows (pacman on Arch Linux
-works the same way). The unified root commands (`make`, `make run`,
-`make run-drone`, `make run-vsynth`) are phase 1 of the roadmap and do not
-exist yet; until then the two apps build separately.
-
-Install the toolchain once, from an MSYS2 UCRT64 shell:
+Install once. **Windows**, from an MSYS2 UCRT64 shell:
 
 ```sh
-pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,SDL2,SDL2_ttf,sqlite3}
+pacman -S make mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,sdl3,sdl3-ttf,sqlite3}
 ```
 
-**Drone Commander**, from the repository root. The first configure fetches and
-builds SDL3 from GitHub, which takes a couple of minutes:
+**Arch Linux**:
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./drone_commander.exe
+sudo pacman -S make gcc cmake ninja pkgconf ffmpeg sdl3 sdl3-ttf sqlite
 ```
 
-**vsynth**, from `apps/video-synth/`:
+Nothing else is needed. `make` puts the UCRT64 toolchain on PATH itself, so
+every command below works from the MSYS2 shell and from PowerShell alike.
+
+## Build and run
 
 ```sh
-cmake -B build -G Ninja
-cmake --build build
-./build/vsynth.exe
+make              # build every app
+make run          # run every app
+make run-drone    # Drone Commander only
+make run-vsynth   # vsynth only
+make test         # every test, through ctest
+make package      # zip each app with its DLLs into dist/
+make help         # the full list
 ```
 
-From PowerShell, put `C:\msys64\ucrt64\bin` on PATH first so the DLLs are
-found. Audio in Drone Commander starts hard-muted; see its README for the
-controls.
+Executables land in `build/bin/`. `make clean` removes build products and keeps
+the configuration; `make distclean` removes `build/` and `dist/` entirely.
+`BUILD_TYPE`, `GENERATOR`, `BUILD_DIR` and `DIST_DIR` can be overridden.
+
+CMake presets are there too, for editors and for anyone who prefers CMake
+directly: `cmake --preset ucrt64` (or `linux`, or `release`), then
+`cmake --build build`.
+
+Audio in Drone Commander starts hard-muted and takes a deliberate keypress to
+enable. See its README for the controls and the signal path. vsynth's README
+has the chain syntax and the key map.
 
 ## CI and releases
 
-Every push and pull request builds and tests Drone Commander on Windows and
-publishes a `drone-commander-windows` artifact. Tags matching `v*` create a
-GitHub release with the zip. vsynth joins CI in phase 1.
+Every push and pull request builds and tests both apps on Windows in the same
+MSYS2 UCRT64 environment a developer uses, then publishes an
+`avsynth-windows` artifact holding one zip per app. Tags matching `v*` create a
+GitHub release with the same zips. Each zip carries the executable, its README
+and the DLLs it links, so it runs on a machine with no toolchain installed.

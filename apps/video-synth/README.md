@@ -8,31 +8,26 @@ for the design.
 
 ## Build
 
-Dependencies: libavfilter/libavformat/libavcodec/libavdevice/libavutil, SDL2, SDL2_ttf,
-SQLite3, CMake, Ninja, pkg-config, a C11 compiler.
-
-**Arch Linux**
-
-```sh
-sudo pacman -S gcc cmake ninja pkgconf ffmpeg sdl2 sdl2_ttf sqlite
-cmake -B build -G Ninja && cmake --build build
-./build/vsynth
-```
-
-**Windows (MSYS2 UCRT64 shell)**
+vsynth is built from the repository root along with the rest of the lab, not
+from this folder. See the [root README](../../README.md) for the one-time
+toolchain install, then:
 
 ```sh
-pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,SDL2,SDL2_ttf,sqlite3}
-cmake -B build -G Ninja && cmake --build build
-./build/vsynth.exe
+make run-vsynth
 ```
 
-From a normal PowerShell, `C:\msys64\ucrt64\bin` must be on PATH for the DLLs:
+The executable lands in `build/bin/vsynth.exe`. `make` adds the toolchain to
+PATH itself, so this works from the MSYS2 UCRT64 shell and from PowerShell
+alike. To pass flags, build once and run it directly:
 
-```powershell
-$env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
-.\build\vsynth.exe --region 200,200,640,480 --win 1000,300,640,480
+```sh
+make build
+./build/bin/vsynth.exe --region 200,200,640,480 --win 1000,300,640,480
 ```
+
+Dependencies: libavfilter/libavformat/libavcodec/libavdevice/libavutil, SDL3,
+SDL3_ttf, SQLite3, CMake, Ninja, pkg-config, a C17 compiler. The root README
+has the package lines for MSYS2 and Arch.
 
 ## Run
 

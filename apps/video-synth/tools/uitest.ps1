@@ -3,7 +3,7 @@
 # parse error. Needs no focus; run from PowerShell. Shift/Ctrl+letter chords do
 # not register (SDL reads real modifier state), so preset saving is left to
 # --selftest. Ctrl+Enter does work.
-param([string]$Exe = "$PSScriptRoot\..\build\vsynth.exe", [string]$Out = "$env:TEMP\vsynth-uitest")
+param([string]$Exe = "$PSScriptRoot\..\..\..\build\bin\vsynth.exe", [string]$Out = "$env:TEMP\vsynth-uitest")
 $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
 New-Item -ItemType Directory -Force $Out | Out-Null
 $sp = $Out

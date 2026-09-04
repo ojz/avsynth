@@ -1,7 +1,7 @@
 #ifndef VSYNTH_OPTIONS_H
 #define VSYNTH_OPTIONS_H
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "hud.h"
 #include "project.h"
 

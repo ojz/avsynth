@@ -13,21 +13,17 @@ output is required to explore the controls.
 
 ## Build
 
-Requirements: CMake 3.24 or newer, Ninja, Git and a C17 compiler. On Windows
-that is the MSYS2 UCRT64 toolchain (`pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja}`).
-The first configure fetches and builds SDL3 from GitHub, which takes a couple of minutes.
-
-From the repository root:
+Drone Commander is built from the repository root along with the rest of the
+lab. See the [root README](../../README.md) for the one-time toolchain install,
+then:
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./drone_commander.exe
+make run-drone
 ```
 
-The unified `make` targets (`make run-drone` and friends) arrive with phase 1
-of the [roadmap](../../ROADMAP.md).
+The executable lands in `build/bin/drone_commander.exe`, and `make test` runs
+the DSP tests. Dependencies are SDL3 from pkg-config, CMake, Ninja and a C17
+compiler; nothing is downloaded at configure time.
 
 ## Controls
 

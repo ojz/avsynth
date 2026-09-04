@@ -25,11 +25,16 @@ decision has to change, change it there in the same commit.
 
 ## Language and dependencies
 
-- C17, readable, for every app and shared library. No C++.
-- SDL3 for window, input, rendering, audio device, timing and lifecycle.
-  vsynth is on SDL2 until phase 2; do not add new SDL2-only code there.
+- C17, readable, for every app and shared library. No C++. Compiler extensions
+  are on (gnu17) because the apps use POSIX `strdup` and `strncasecmp`.
+- SDL3 for window, input, rendering, audio device, timing and lifecycle. Both
+  apps are on SDL3; never reintroduce SDL2, and remember SDL3 draws in floats
+  (`SDL_FRect`), needs the window for text input, and returns `true` on success
+  where SDL2 returned 0.
 - CMake with Ninja and pkg-config for system libraries. Toolchain is MSYS2
-  UCRT64 on Windows and pacman on Arch (ROADMAP D1).
+  UCRT64 on Windows and pacman on Arch (ROADMAP D1). Nothing is vendored or
+  fetched at configure time, and the root is the only build entry point: build
+  and run through `make` from the repository root, never from an app folder.
 - Do not introduce SuperCollider, Faust, or another synthesis language.
 - Keep dependencies minimal and justify any new one. FFmpeg belongs to vsynth's
   filter path and, later, to recording; it never enters an audio DSP path.

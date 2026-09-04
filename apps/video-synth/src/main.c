@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <libavutil/frame.h>
 
 #include "window.h"
@@ -584,14 +584,16 @@ int main(int argc, char **argv)
         if (!cli_win)    { win_x = geo.win_x; win_y = geo.win_y; win_w = geo.win_w; win_h = geo.win_h; }
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_StopTextInput();   /* SDL turns it on by default; text modes turn it on when open */
 
     a.win = window_create("vsynth", win_x, win_y, win_w, win_h);
     if (!a.win) return 1;
+    /* SDL may start with text input on, and it needs the window in SDL3.
+     * The text modes turn it on when they open. */
+    SDL_StopTextInput(window_sdl(a.win));
     a.hud = hud_create(window_renderer(a.win), &a.rack);
     if (!a.hud) return 1;
     a.ed = editor_create(a.hud);
@@ -655,19 +657,19 @@ int main(int argc, char **argv)
 
     int running = 1;
     int frames = 0;
-    Uint32 fps_t0 = SDL_GetTicks();
-    Uint32 shot_at = screenshot ? fps_t0 + 2000 : 0;
+    Uint64 fps_t0 = SDL_GetTicks();
+    Uint64 shot_at = screenshot ? fps_t0 + 2000 : 0;
     while (running) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) { running = 0; break; }
+            if (ev.type == SDL_EVENT_QUIT) { running = 0; break; }
 
             /* keys that work in every mode: the F-key tabs and chain switching */
-            if (ev.type == SDL_KEYDOWN) {
-                SDL_Keycode k = ev.key.keysym.sym;
-                int ctrl = (SDL_GetModState() & KMOD_CTRL) != 0;
+            if (ev.type == SDL_EVENT_KEY_DOWN) {
+                SDL_Keycode k = ev.key.key;
+                int ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
                 enum Mode tab = MODE_MAIN;
-                if (k == SDLK_F1 || (k == SDLK_h && ctrl)) tab = MODE_HELP;
+                if (k == SDLK_F1 || (k == SDLK_H && ctrl)) tab = MODE_HELP;
                 else if (k == SDLK_F2) tab = MODE_PANEL;
                 else if (k == SDLK_F3) tab = MODE_EDIT;
                 else if (k == SDLK_F4) tab = MODE_PROJECT;
@@ -726,41 +728,41 @@ int main(int argc, char **argv)
                 if (act != OPT_NONE) continue;
             } else if (a.mode == MODE_PANEL) {
                 if (hud_handle_event(a.hud, &ev, &a.rack, a.voice)) {
-                    if (ev.type != SDL_MOUSEMOTION) show_status(&a);
+                    if (ev.type != SDL_EVENT_MOUSE_MOTION) show_status(&a);
                     continue;
                 }
             }
             if (window_handle_event(a.win, &ev))
                 continue;
-            if (ev.type != SDL_KEYDOWN) continue;
+            if (ev.type != SDL_EVENT_KEY_DOWN) continue;
 
             /* MAIN and PANEL share these keys */
             SDL_Keymod mod = SDL_GetModState();
-            double factor = (mod & KMOD_SHIFT) ? 0.1 : (mod & KMOD_CTRL) ? 10.0 : 1.0;
-            SDL_Keycode key = ev.key.keysym.sym;
-            int slot = slot_for_scancode(ev.key.keysym.scancode);
-            if (slot) { preset_key(&a, slot, (mod & KMOD_SHIFT) != 0); continue; }
+            double factor = (mod & SDL_KMOD_SHIFT) ? 0.1 : (mod & SDL_KMOD_CTRL) ? 10.0 : 1.0;
+            SDL_Keycode key = ev.key.key;
+            int slot = slot_for_scancode(ev.key.scancode);
+            if (slot) { preset_key(&a, slot, (mod & SDL_KMOD_SHIFT) != 0); continue; }
             switch (key) {
             case SDLK_ESCAPE:
                 set_mode(&a, MODE_MAIN);
                 break;
-            case SDLK_q:
+            case SDLK_Q:
                 running = 0;
                 break;
-            case SDLK_f:
+            case SDLK_F:
                 window_toggle_fullscreen(a.win);
                 break;
-            case SDLK_h:
+            case SDLK_H:
                 set_mode(&a, a.mode == MODE_PANEL ? MODE_MAIN : MODE_PANEL);
                 break;
-            case SDLK_e:
+            case SDLK_E:
                 set_mode(&a, MODE_EDIT);
                 break;
-            case SDLK_n:
-                if (mod & KMOD_CTRL) new_chain(&a);
+            case SDLK_N:
+                if (mod & SDL_KMOD_CTRL) new_chain(&a);
                 break;
             case SDLK_TAB:
-                rack_select_next(&a.rack, (mod & KMOD_SHIFT) ? -1 : 1);
+                rack_select_next(&a.rack, (mod & SDL_KMOD_SHIFT) ? -1 : 1);
                 show_status(&a);
                 break;
             case SDLK_UP:
@@ -781,21 +783,21 @@ int main(int argc, char **argv)
                 rack_reset_selected(&a.rack, a.voice);
                 show_status(&a);
                 break;
-            case SDLK_r:
+            case SDLK_R:
                 rack_reset_all(&a.rack, a.voice);
                 a.preset_slot = 0;
                 hud_set_patch(a.hud, 0);
                 show_status(&a);
                 break;
-            case SDLK_x: {
-                int wild = (mod & KMOD_SHIFT) != 0;
+            case SDLK_X: {
+                int wild = (mod & SDL_KMOD_SHIFT) != 0;
                 rack_randomize(&a.rack, a.voice, wild ? 1.0 : 0.3);
                 a.preset_slot = 0;
                 hud_set_patch(a.hud, 0);
                 notice(&a, wild ? "randomized (wild)" : "randomized");
                 break;
             }
-            case SDLK_c:
+            case SDLK_C:
                 pick_region(&a);
                 break;
             default:
@@ -803,7 +805,7 @@ int main(int argc, char **argv)
             }
         }
 
-        if (shot_at && SDL_TICKS_PASSED(SDL_GetTicks(), shot_at)) {
+        if (shot_at && SDL_GetTicks() >= shot_at) {
             window_save_bmp(a.win, screenshot);
             shot_at = 0;
         }
@@ -830,7 +832,7 @@ int main(int argc, char **argv)
                 av_frame_free(&f);
                 drew = 1;
                 frames++;
-                Uint32 now = SDL_GetTicks();
+                Uint64 now = SDL_GetTicks();
                 if (now - fps_t0 >= 2000) {
                     double fps = frames * 1000.0 / (now - fps_t0);
                     hud_set_fps(a.hud, fps);

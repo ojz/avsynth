@@ -277,13 +277,13 @@ void help_open(Help *h, const char *query)
                 break;
             }
     filter_list(h);
-    SDL_StartTextInput();
+    hud_text_input(h->hud, 1);
 }
 
 void help_close(Help *h)
 {
     h->open = 0;
-    SDL_StopTextInput();
+    hud_text_input(h->hud, 0);
 }
 
 int         help_is_open(const Help *h) { return h->open; }
@@ -295,7 +295,7 @@ int help_handle_event(Help *h, const SDL_Event *ev)
 {
     if (!h->open) return HELP_NONE;
     switch (ev->type) {
-    case SDL_TEXTINPUT:
+    case SDL_EVENT_TEXT_INPUT:
         if (h->detail) return HELP_CONSUMED;
         if (strlen(h->query) + strlen(ev->text.text) < QUERY_CAP) {
             strcat(h->query, ev->text.text);
@@ -303,10 +303,10 @@ int help_handle_event(Help *h, const SDL_Event *ev)
             filter_list(h);
         }
         return HELP_CONSUMED;
-    case SDL_KEYUP:
+    case SDL_EVENT_KEY_UP:
         return HELP_CONSUMED;
-    case SDL_KEYDOWN:
-        switch (ev->key.keysym.sym) {
+    case SDL_EVENT_KEY_DOWN:
+        switch (ev->key.key) {
         case SDLK_ESCAPE:
             return HELP_CLOSE;
         case SDLK_BACKSPACE:
@@ -335,7 +335,7 @@ int help_handle_event(Help *h, const SDL_Event *ev)
         case SDLK_RIGHT:
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
-            if (h->detail) return ev->key.keysym.sym == SDLK_RIGHT ? HELP_CONSUMED : HELP_INSERT;
+            if (h->detail) return ev->key.key == SDLK_RIGHT ? HELP_CONSUMED : HELP_INSERT;
             if (h->nshown) build_detail(h, h->filters[h->shown[h->sel]]);
             break;
         default:

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
@@ -34,15 +34,15 @@ struct Voice {
     char       *chain;
 
     SDL_Thread *thread;
-    SDL_atomic_t quit;
-    SDL_atomic_t failed;
-    SDL_atomic_t ntaps;
+    SDL_AtomicInt quit;
+    SDL_AtomicInt failed;
+    SDL_AtomicInt ntaps;
 
-    SDL_mutex  *mbx_lock;
+    SDL_Mutex  *mbx_lock;
     Mailbox     box[NBOX];
 
     /* command queue (ring) */
-    SDL_mutex  *cmd_lock;
+    SDL_Mutex  *cmd_lock;
     Command     cmds[CMD_QUEUE_CAP];
     int         cmd_head, cmd_tail;
 
@@ -166,7 +166,7 @@ AVFrame *voice_take_tap(Voice *v, int tap)
     if (tap < 0 || tap >= GRAPH_MAX_TAPS) return NULL;
     return take(v, 1 + tap);
 }
-int voice_tap_count(const Voice *v) { return SDL_AtomicGet((SDL_atomic_t *)&v->ntaps); }
+int voice_tap_count(const Voice *v) { return SDL_GetAtomicInt((SDL_AtomicInt *)&v->ntaps); }
 
 int voice_send_command(Voice *v, const char *target, const char *cmd, const char *arg)
 {
@@ -220,10 +220,10 @@ static int voice_thread(void *arg)
 
     GraphSpec spec = { v->chain, dec->width, dec->height, dec->pix_fmt, fmt->streams[stream]->time_base };
     if (graph_build(&spec, &g, v->error, sizeof v->error) < 0) goto fail;
-    SDL_AtomicSet(&v->ntaps, g.ntaps);
+    SDL_SetAtomicInt(&v->ntaps, g.ntaps);
     fprintf(stderr, "voice: graph up, %d tap%s\n", g.ntaps, g.ntaps == 1 ? "" : "s");
 
-    while (!SDL_AtomicGet(&v->quit)) {
+    while (!SDL_GetAtomicInt(&v->quit)) {
         drain_commands(v, g.graph);
 
         ret = av_read_frame(fmt, pkt);
@@ -255,7 +255,7 @@ static int voice_thread(void *arg)
     goto out;
 fail:
     fprintf(stderr, "voice: %s\n", v->error);
-    SDL_AtomicSet(&v->failed, 1);
+    SDL_SetAtomicInt(&v->failed, 1);
 out:
     av_frame_free(&frame);
     av_frame_free(&filt);
@@ -280,9 +280,9 @@ Voice *voice_start(const VoiceConfig *cfg)
     v->cfg.chain = v->chain;
     v->mbx_lock = SDL_CreateMutex();
     v->cmd_lock = SDL_CreateMutex();
-    SDL_AtomicSet(&v->quit, 0);
-    SDL_AtomicSet(&v->failed, 0);
-    SDL_AtomicSet(&v->ntaps, 0);
+    SDL_SetAtomicInt(&v->quit, 0);
+    SDL_SetAtomicInt(&v->failed, 0);
+    SDL_SetAtomicInt(&v->ntaps, 0);
 
     v->thread = SDL_CreateThread(voice_thread, "voice", v);
     if (!v->thread) {
@@ -296,7 +296,7 @@ Voice *voice_start(const VoiceConfig *cfg)
 void voice_stop(Voice *v)
 {
     if (!v) return;
-    SDL_AtomicSet(&v->quit, 1);
+    SDL_SetAtomicInt(&v->quit, 1);
     if (v->thread) SDL_WaitThread(v->thread, NULL);
     for (int i = 0; i < NBOX; i++)
         if (v->box[i].latest) av_frame_free(&v->box[i].latest);
@@ -306,5 +306,5 @@ void voice_stop(Voice *v)
     free(v);
 }
 
-int         voice_failed(const Voice *v) { return SDL_AtomicGet((SDL_atomic_t *)&v->failed); }
+int         voice_failed(const Voice *v) { return SDL_GetAtomicInt((SDL_AtomicInt *)&v->failed); }
 const char *voice_error(const Voice *v)  { return v->error; }

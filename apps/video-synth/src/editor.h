@@ -1,7 +1,7 @@
 #ifndef VSYNTH_EDITOR_H
 #define VSYNTH_EDITOR_H
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "hud.h"
 
 /*

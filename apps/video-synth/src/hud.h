@@ -2,7 +2,7 @@
 #define VSYNTH_HUD_H
 
 #include <stdint.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "rack.h"
 #include "voice.h"
 
@@ -16,7 +16,7 @@
  *   - the knobs panel body (mode MODE_PANEL): one row per control with a bar;
  *   - tap thumbnails along the bottom edge, in any mode that shows the picture;
  *   - transient notices, shown even on the bare picture;
- *   - the glyph atlas (SDL2_ttf, system monospace font) via hud_text().
+ *   - the glyph atlas (SDL3_ttf, system monospace font) via hud_text().
  *
  * Panel mouse: click a row to select it, drag on its bar to set the value,
  * click the module name to bypass the module, wheel to nudge. Only the left
@@ -61,6 +61,17 @@ int   hud_text_width(const Hud *h, const char *s);
 int   hud_line_h(const Hud *h);
 int   hud_char_w(const Hud *h);
 void  hud_fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A);
+
+/* SDL3 draws in floats while layout stays in whole pixels, so every rect
+ * crosses over here on its way to the renderer. */
+static inline SDL_FRect hud_frect(SDL_Rect r)
+{
+    return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
+}
+
+/* SDL3 wants the window to turn text input on, and the HUD already holds the
+ * renderer it belongs to. Every text mode goes through here. */
+void  hud_text_input(Hud *h, int on);
 
 /* Shared palette */
 extern const SDL_Color HUD_TEXT, HUD_DIM, HUD_OFF, HUD_SEL, HUD_OK, HUD_ERR;

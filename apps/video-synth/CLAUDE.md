@@ -1,27 +1,35 @@
 # vsynth
 
-C11 video feedback synthesizer: screen region -> user-written libavfilter chain with knobs derived
-from the text -> borderless SDL2 window you drag into the capture region. Chains and presets in a
+C17 video feedback synthesizer: screen region -> user-written libavfilter chain with knobs derived
+from the text -> borderless SDL3 window you drag into the capture region. Chains and presets in a
 SQLite project file. PRD.md is the design doc, README.md has the build steps, chain rules and key
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
 CLAUDE.md holds the ffplay-era environment notes).
 
-**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Run every command below from this folder, not the repo root; the root CMake only builds it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 dev libs. The repo-wide plan is `../../ROADMAP.md`: phase 1 moves the build to the root (`make run-vsynth`), phase 2 ports this app to SDL3, phases 3 and 4 move the parameter model, SQLite store and sheet UI into `shared/`. Until a phase lands, this file describes the truth.
+**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Since 2026-09-04 the repository root is the only build entry point: run `make` from `C:\dev\avsynth`, never a `cmake` inside this folder (its CMakeLists refuses to configure standalone). The repo-wide plan is `../../ROADMAP.md`; phases 1 and 2 are done, so this app is C17 on SDL3/SDL3_ttf. Phases 3 and 4 move the parameter model, SQLite store and sheet UI into `shared/`.
 
 ## Build and run (Windows)
 
-Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 9 dev libs, SDL2, SDL2_ttf, sqlite3). The Bash
-tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so use absolute paths:
+Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 9 dev libs, SDL3, SDL3_ttf, sqlite3, plus
+the msys `make`). From PowerShell, `make` works directly because the Makefile puts `/ucrt64/bin` on PATH:
 
-```sh
-/c/msys64/usr/bin/bash -lc 'export PATH=/ucrt64/bin:$PATH; cmake --build /c/dev/avsynth/apps/video-synth/build'
-PATH="/c/msys64/ucrt64/bin:$PATH" ./build/vsynth.exe --selftest --project /tmp/t.vsynth
+```powershell
+make run-vsynth      # or: make build, make test, make package
 ```
 
-From PowerShell the DLLs need `C:\msys64\ucrt64\bin` on PATH. There is no `python` on this machine;
-use sed for scripted edits. Bash-tool heredocs containing a single quote fail to parse; use
-the Write tool for such files. Git identity for this repo is the personal gmail one, not the
-Flexso work email.
+The Bash tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so from Bash
+use absolute paths and set PATH yourself:
+
+```sh
+/c/msys64/usr/bin/bash -lc 'export PATH=/ucrt64/bin:$PATH; cmake --build /c/dev/avsynth/build --parallel'
+```
+
+The exe is `build/bin/vsynth.exe` at the repo root. Running it outside `make` needs
+`C:\msys64\ucrt64\bin` on PATH for the DLLs. There is no `python` on this machine; use sed for
+scripted edits, but note that sed, awk and perl all mangle backslash-heavy content such as Windows
+paths in PowerShell files, so use the Write tool and splice with `head`/`tail` for those. Bash-tool
+heredocs containing a single quote fail to parse; use the Write tool for such files. Git identity for
+this repo is the personal gmail one, not the Flexso work email.
 
 The default project file lives in `%APPDATA%\vsynth\default.vsynth`. Tests should pass
 `--project` with a scratch path so they never touch it.
@@ -67,6 +75,12 @@ running it: the window pops up on their desktop.
 - Chain text is parsed into a throwaway graph (`rack_from_chain`) before it replaces the running
   one, so a typo never kills the picture. Keep it that way.
 - Keep the window painting during move/resize: the app owns the drag loop, no OS modal move loop.
+- SDL3 conventions since the 2026-09-04 port: layout is integer `SDL_Rect` and `hud_frect()` converts
+  at the draw call; text input goes through `hud_text_input()` because SDL3 needs the window;
+  tick fields are `Uint64` and compared directly (`SDL_TICKS_PASSED` is gone); most calls return
+  `true` on success where SDL2 returned 0; letter keycodes are uppercase (`SDLK_Q`) while preset
+  digits stay bound by scancode for AZERTY; vsync and scale mode are renderer and texture
+  properties. The root CMake strips SDL3's pkg-config `-mwindows` so `-mconsole` keeps stderr.
 - `vsynth --selftest` must keep passing; run it after any change to graph, rack, project, or voice.
 
 ## Roadmap (PRD order)

@@ -40,25 +40,28 @@ parameters, knobs derived from it, presets, a loop you play by ear (or eye).
 - One toolchain, one set of root commands, one CI that builds and packages
   every app.
 
-## 3. Where things stand (2026-09-04)
+## 3. Where things stand (2026-09-04, after P1 and P2)
 
-Two apps, merged into one repository on 2026-09-04. Both build and run, but the
-merge stopped at moving the files:
+Two apps in one repository, on one toolchain, one C standard and one windowing
+API. What is left to unify is the code itself: the parameter model, preset
+storage and the control surface are still per app.
 
 | | Drone Commander | vsynth |
 |---|---|---|
 | Domain | 3-oscillator audio drone synth | screen region through a libavfilter chain, video feedback |
-| Standard | C17 | C11 |
-| Window / input | SDL3 3.2.10, fetched from GitHub by CMake FetchContent, static | SDL2 + SDL2_ttf from system pkg-config |
+| Standard | C17 | C17 |
+| Window / input | SDL3 from pkg-config | SDL3 + SDL3_ttf from pkg-config |
 | Other libraries | none | ffmpeg (avfilter, avformat, avcodec, avdevice, avutil), sqlite3 |
 | Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | knobs derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
-| UI | fixed 1180x760 panel, sliders and switches, SDL debug text | modal sheet with F-key tabs, knob rows, text editor, filter browser, glyph atlas from SDL2_ttf |
-| Root build | default target, only app in CI and packaging | optional (`AVSYNTH_BUILD_VIDEO_SYNTH=OFF`), built from its own folder |
+| UI | fixed 1180x760 panel, sliders and switches, SDL debug text | modal sheet with F-key tabs, knob rows, text editor, filter browser, glyph atlas from SDL3_ttf |
+| Root build | `make run-drone`, in CI and packaging | `make run-vsynth`, in CI and packaging |
 
-Root `make run` only knows Drone Commander, and on the development machine the
-root Makefile cannot run at all: it expects GNU make and a winget CMake that are
-not installed, while the only working toolchain is MSYS2 UCRT64.
+The merge on 2026-09-04 moved files but not build systems: each app had grown
+whatever toolchain its own machine happened to have, and CI gated only one of
+them, so nothing forced them together. That is the part P1 and P2 fixed, and CI
+now fails if they drift again. The remaining divergence is deliberate and
+scheduled: P3 and P4.
 
 ## 4. Decisions
 
@@ -188,27 +191,48 @@ editor, filter browser, project view).
 Each phase ends in a commit on `main` that leaves both apps building and
 their tests passing.
 
-**P0. Decisions and documents.** This roadmap; a root README that describes
-the repository instead of pasting an app's README; repo-wide `AGENTS.md`.
-Done in the commit that adds this file.
+**P0. Decisions and documents. Done 2026-09-04.** This roadmap; a root README
+that describes the repository instead of pasting an app's README; repo-wide
+`AGENTS.md`.
 
-**P1. One toolchain, one set of root commands.**
-- `CMakePresets.json` with `ucrt64` and `linux` presets, Ninja, RelWithDebInfo.
-- Root `CMakeLists.txt` builds both apps unconditionally; Drone Commander
-  takes SDL3 from pkg-config instead of FetchContent; output in `build/bin/`.
-- Root Makefile per D3. Install notes for `pacman -S make` (msys) and the
-  ucrt64 packages: `gcc cmake ninja pkgconf ffmpeg sdl3 sdl3-ttf sqlite3`.
-- CI on `msys2/setup-msys2`; package step zips each app with its DLLs; the
-  release job uploads both.
-- vsynth's `CLAUDE.md` build notes updated to the root commands.
-- Exit: `make`, `make run`, `make run-drone`, `make run-vsynth`, `make test`
-  work from a fresh MSYS2 UCRT64 shell and CI is green with two artifacts.
+**P1. One toolchain, one set of root commands. Done 2026-09-04.**
+- `CMakePresets.json` with `ucrt64`, `linux` and `release` presets, Ninja.
+- Root `CMakeLists.txt` builds both apps unconditionally, sets C17 for
+  everything, finds SDL3 and SDL3_ttf once through pkg-config, shares one
+  warning set through the `avsynth_flags` interface target, and puts every
+  executable in `build/bin/`. Drone Commander's FetchContent of SDL3 is gone.
+  SDL3's pkg-config `-mwindows` is stripped so each app picks its subsystem.
+- Root Makefile per D3, which prepends `/ucrt64/bin` to PATH so the same
+  commands work from PowerShell and from the MSYS2 shell.
+- `tools/package.sh` zips each app with the DLLs it links. It reads the import
+  table with `objdump`, not `ldd`: ldd resolves by loading the image, so it
+  depends on PATH being in a form the Windows loader accepts, which is not
+  true when make is started from PowerShell.
+- CI on `msys2/setup-msys2` in the UCRT64 environment, building, testing and
+  packaging both apps; the release job uploads both zips.
+- Verified: `make`, `make help`, `make test` and `make package` from
+  PowerShell; the packaged vsynth passes `--selftest` on a PATH holding only
+  the Windows system directories, so the bundle is self-contained.
 
-**P2. vsynth on SDL3.** `window.c`, `hud.c`, `editor.c`, `help.c`,
-`picker.c`, `options.c`, `main.c` move to the SDL3 API; SDL2_ttf to SDL3_ttf.
-Borderless move and resize, scancode key bindings, hit-testing and the region
-picker are the sensitive spots. Exit: `vsynth --selftest` passes and
-`tools/uitest.ps1` produces the same three screenshots.
+**P2. vsynth on SDL3. Done 2026-09-04.** `window.c`, `hud.c`, `editor.c`,
+`help.c`, `picker.c`, `options.c`, `main.c` and `voice.c` moved to SDL3 and
+SDL3_ttf. What the port turned on:
+- Layout stays in integer `SDL_Rect`; `hud_frect()` converts at the draw call,
+  because SDL3 renders in floats.
+- Text input needs a window, so it goes through `hud_text_input()`, which asks
+  the renderer for its window.
+- `SDL_TICKS_PASSED` is gone and ticks are 64-bit: tick fields are `Uint64`
+  and comparisons are plain.
+- vsync is a renderer property (`SDL_SetRenderVSync`), scale quality is a
+  texture property, fullscreen is a bool, displays are enumerated by id, and
+  `SDL_RenderReadPixels` returns a new surface.
+- Letter keycodes are uppercase (`SDLK_Q`). Digit presets still bind by
+  scancode, so AZERTY keeps working.
+- Verified: `vsynth --selftest` reports `OK (0 failures)`, covering derived
+  knobs, the enum knob, rejection of a broken chain, preset round-trip,
+  chain rename and delete, and a voice restart on a new capture size.
+  `tools/uitest.ps1` now defaults to `build/bin/vsynth.exe`; it has not been
+  re-run since the port.
 
 **P3. `shared/param` and `shared/store`.**
 - Extract the parameter model; `rack.c` derives Params from the graph,

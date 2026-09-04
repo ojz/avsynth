@@ -1,36 +1,21 @@
-include(FetchContent)
+if(NOT TARGET avsynth_flags)
+    message(FATAL_ERROR
+        "Configure the repository root, not this folder. From the top of avsynth: "
+        "make, or cmake --preset ucrt64.")
+endif()
 
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    SDL3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-3.2.10
-    GIT_SHALLOW TRUE
-)
-FetchContent_MakeAvailable(SDL3)
-
+# The DSP engine is platform-independent standard C: no SDL, no ffmpeg, no
+# SQLite. It renders real-time buffers and offline test buffers alike.
 add_library(drone_dsp src/dsp.c)
 target_include_directories(drone_dsp PUBLIC src)
+target_link_libraries(drone_dsp PUBLIC avsynth_flags)
 if(NOT MSVC)
     target_link_libraries(drone_dsp PUBLIC m)
 endif()
 
 add_executable(drone_commander src/main.c src/panel.c)
-target_link_libraries(drone_commander PRIVATE drone_dsp SDL3::SDL3)
-set_target_properties(drone_commander PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
-)
-
-if(MSVC)
-    target_compile_options(drone_dsp PRIVATE /W4)
-    target_compile_options(drone_commander PRIVATE /W4)
-else()
-    target_compile_options(drone_dsp PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(drone_commander PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+target_link_libraries(drone_commander PRIVATE drone_dsp avsynth_flags PkgConfig::SDL3)
 
 add_executable(dsp_tests tests/test_dsp.c)
-target_link_libraries(dsp_tests PRIVATE drone_dsp)
+target_link_libraries(dsp_tests PRIVATE drone_dsp avsynth_flags)
 add_test(NAME dsp_tests COMMAND dsp_tests)

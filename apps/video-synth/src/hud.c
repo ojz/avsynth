@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <SDL2/SDL_ttf.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #define FIRST_GLYPH 32
 #define LAST_GLYPH  126
@@ -50,7 +50,7 @@ struct Hud {
     int    cap_x, cap_y, cap_w, cap_h;
     double fps;
     char   notice[160];
-    Uint32 notice_until;
+    Uint64 notice_until;
 
     /* layout from the last draw, for hit testing */
     SDL_Rect panel;        /* the sheet */
@@ -79,10 +79,10 @@ static const char *FONT_CANDIDATES[] = {
     NULL
 };
 
-static int load_font(Hud *h, int px)
+static int load_font(Hud *h, float px)
 {
-    if (TTF_WasInit() == 0 && TTF_Init() != 0) {
-        fprintf(stderr, "hud: TTF_Init: %s\n", TTF_GetError());
+    if (TTF_WasInit() == 0 && !TTF_Init()) {
+        fprintf(stderr, "hud: TTF_Init: %s\n", SDL_GetError());
         return -1;
     }
     for (int i = 0; FONT_CANDIDATES[i]; i++) {
@@ -93,13 +93,13 @@ static int load_font(Hud *h, int px)
         fprintf(stderr, "hud: no monospace font found; panel has no text\n");
         return -1;
     }
-    h->line_h = TTF_FontHeight(h->font);
+    h->line_h = TTF_GetFontHeight(h->font);
 
     /* Render every printable ASCII glyph once into a single-row atlas. */
     int total_w = 0, maxadv = 0;
     for (int c = FIRST_GLYPH; c <= LAST_GLYPH; c++) {
         int minx, maxx, miny, maxy, adv;
-        if (TTF_GlyphMetrics(h->font, (Uint16)c, &minx, &maxx, &miny, &maxy, &adv) != 0) adv = px;
+        if (!TTF_GetGlyphMetrics(h->font, (Uint32)c, &minx, &maxx, &miny, &maxy, &adv)) adv = (int)px;
         Glyph *g = &h->glyphs[c - FIRST_GLYPH];
         g->advance = adv;
         g->src = (SDL_Rect){ total_w, 0, adv + 2, h->line_h };
@@ -108,20 +108,20 @@ static int load_font(Hud *h, int px)
     }
     h->char_w = maxadv;
 
-    SDL_Surface *atlas = SDL_CreateRGBSurfaceWithFormat(0, total_w, h->line_h, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *atlas = SDL_CreateSurface(total_w, h->line_h, SDL_PIXELFORMAT_ARGB8888);
     if (!atlas) return -1;
-    SDL_FillRect(atlas, NULL, 0);
+    SDL_FillSurfaceRect(atlas, NULL, 0);
     SDL_Color white = { 255, 255, 255, 255 };
     for (int c = FIRST_GLYPH; c <= LAST_GLYPH; c++) {
-        SDL_Surface *gs = TTF_RenderGlyph_Blended(h->font, (Uint16)c, white);
+        SDL_Surface *gs = TTF_RenderGlyph_Blended(h->font, (Uint32)c, white);
         if (!gs) continue;
         SDL_Rect dst = h->glyphs[c - FIRST_GLYPH].src;
         SDL_SetSurfaceBlendMode(gs, SDL_BLENDMODE_NONE);
         SDL_BlitSurface(gs, NULL, atlas, &dst);
-        SDL_FreeSurface(gs);
+        SDL_DestroySurface(gs);
     }
     h->atlas = SDL_CreateTextureFromSurface(h->ren, atlas);
-    SDL_FreeSurface(atlas);
+    SDL_DestroySurface(atlas);
     if (!h->atlas) return -1;
     SDL_SetTextureBlendMode(h->atlas, SDL_BLENDMODE_BLEND);
     return 0;
@@ -148,8 +148,9 @@ void hud_text(Hud *h, int x, int y, SDL_Color col, const char *s)
         int c = (unsigned char)*s;
         if (c < FIRST_GLYPH || c > LAST_GLYPH) c = 63;
         const Glyph *g = &h->glyphs[c - FIRST_GLYPH];
-        SDL_Rect dst = { x, y, g->src.w, g->src.h };
-        SDL_RenderCopy(h->ren, h->atlas, &g->src, &dst);
+        SDL_FRect src = hud_frect(g->src);
+        SDL_FRect dst = hud_frect((SDL_Rect){ x, y, g->src.w, g->src.h });
+        SDL_RenderTexture(h->ren, h->atlas, &src, &dst);
         x += g->advance;
     }
 }
@@ -169,8 +170,17 @@ int  hud_char_w(const Hud *h) { return h->char_w; }
 
 void hud_fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
 {
+    SDL_FRect f = hud_frect(r);
     SDL_SetRenderDrawColor(ren, R, G, B, A);
-    SDL_RenderFillRect(ren, &r);
+    SDL_RenderFillRect(ren, &f);
+}
+
+void hud_text_input(Hud *h, int on)
+{
+    SDL_Window *w = SDL_GetRenderWindow(h->ren);
+    if (!w) return;
+    if (on) SDL_StartTextInput(w);
+    else    SDL_StopTextInput(w);
 }
 
 /* ---------- lifecycle & state ---------- */
@@ -183,7 +193,7 @@ Hud *hud_create(SDL_Renderer *ren, const Rack *rack)
     h->ren = ren;
     h->mode = MODE_PANEL;
     h->drag_control = -1;
-    if (load_font(h, 13) != 0) {
+    if (load_font(h, 13.0f) != 0) {
         h->line_h = 14;
         h->char_w = 7;
     }
@@ -238,6 +248,7 @@ void hud_set_tap_frame(Hud *h, int tap, const uint8_t *bgra, int w, int h_, int 
         if (h->tap_tex[tap]) SDL_DestroyTexture(h->tap_tex[tap]);
         h->tap_tex[tap] = SDL_CreateTexture(h->ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h_);
         if (!h->tap_tex[tap]) return;
+        SDL_SetTextureScaleMode(h->tap_tex[tap], SDL_SCALEMODE_LINEAR);
         h->tap_w[tap] = w;
         h->tap_h[tap] = h_;
     }
@@ -256,8 +267,9 @@ SDL_Rect hud_sheet(Hud *h, SDL_Renderer *ren, int W, int H)
     if (w > SHEET_MAX_W) w = SHEET_MAX_W;
     SDL_Rect sheet = { 8, 8, w, H - 16 };
     hud_fill(ren, sheet, 0, 0, 0, 215);
+    SDL_FRect sheet_f = hud_frect(sheet);
     SDL_SetRenderDrawColor(ren, 255, 150, 30, 110);
-    SDL_RenderDrawRect(ren, &sheet);
+    SDL_RenderRect(ren, &sheet_f);
 
     int x = sheet.x + PAD, y = sheet.y + PAD;
     int rowh = h->line_h + 2;
@@ -301,7 +313,7 @@ void hud_footer(Hud *h, const SDL_Rect *body, const char *left, const char *righ
     int cols = (body->w - rw - (rw ? 2 * cw : 0)) / cw;   /* left text stops short of the right text */
     if (cols < 0) cols = 0;
     char buf[256];
-    if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
+    if (h->notice[0] && SDL_GetTicks() < h->notice_until) {
         snprintf(buf, sizeof buf, "%.*s", cols, h->notice);
         hud_text(h, body->x, y, HUD_OK, buf);
     } else if (left) {
@@ -326,10 +338,11 @@ static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H, int in_sheet)
         int tw = h->tap_h[i] > 0 ? th * h->tap_w[i] / h->tap_h[i] : th * 4 / 3;
         tx -= tw;
         SDL_Rect dst = { tx, ty, tw, th };
+        SDL_FRect dst_f = hud_frect(dst);
         hud_fill(ren, (SDL_Rect){ dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2 }, 0, 0, 0, 200);
-        if (h->tap_tex[i]) SDL_RenderCopy(ren, h->tap_tex[i], NULL, &dst);
+        if (h->tap_tex[i]) SDL_RenderTexture(ren, h->tap_tex[i], NULL, &dst_f);
         SDL_SetRenderDrawColor(ren, 255, 255, 255, 60);
-        SDL_RenderDrawRect(ren, &dst);
+        SDL_RenderRect(ren, &dst_f);
         hud_fill(ren, (SDL_Rect){ dst.x, dst.y, hud_text_width(h, h->tap_name[i]) + 6, h->line_h }, 0, 0, 0, 170);
         hud_text(h, dst.x + 3, dst.y, HUD_DIM, h->tap_name[i]);
         tx -= 6;
@@ -425,7 +438,7 @@ void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
     if (h->mode == MODE_MAIN) {
         h->panel = (SDL_Rect){ 0, 0, 0, 0 };
         /* the bare picture still gets transient notices (mode hints, preset loads) */
-        if (h->notice[0] && !SDL_TICKS_PASSED(SDL_GetTicks(), h->notice_until)) {
+        if (h->notice[0] && SDL_GetTicks() < h->notice_until) {
             hud_fill(ren, (SDL_Rect){ 8, 8, hud_text_width(h, h->notice) + 12, h->line_h + 4 }, 0, 0, 0, 180);
             hud_text(h, 14, 10, HUD_OK, h->notice);
         }
@@ -462,7 +475,7 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
     if (h->mode != MODE_PANEL) return 0;
 
     switch (ev->type) {
-    case SDL_MOUSEBUTTONDOWN: {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         int mx = ev->button.x, my = ev->button.y;
         if (!in_rect(mx, my, &h->panel)) return 0;
         if (ev->button.button != SDL_BUTTON_LEFT) return 0;   /* right-drag resizes, even over the panel */
@@ -478,7 +491,7 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
         }
         return 1;
     }
-    case SDL_MOUSEMOTION:
+    case SDL_EVENT_MOUSE_MOTION:
         if (h->drag_control < 0) return in_rect(ev->motion.x, ev->motion.y, &h->panel);
         for (int i = 0; i < h->nrows; i++)
             if (h->rows[i].control == h->drag_control) {
@@ -486,19 +499,20 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
                 break;
             }
         return 1;
-    case SDL_MOUSEBUTTONUP:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
         if (h->drag_control >= 0) { h->drag_control = -1; return 1; }
         return ev->button.button == SDL_BUTTON_LEFT && in_rect(ev->button.x, ev->button.y, &h->panel);
-    case SDL_MOUSEWHEEL: {
-        int mx, my;
-        SDL_GetMouseState(&mx, &my);
+    case SDL_EVENT_MOUSE_WHEEL: {
+        float fmx, fmy;
+        SDL_GetMouseState(&fmx, &fmy);   /* floats in SDL3; the rows are integer */
+        int mx = (int)fmx, my = (int)fmy;
         const Row *row = row_at(h, mx, my);
         if (!row) return in_rect(mx, my, &h->panel);
         rack->sel = row->control;
         int dir = ev->wheel.y > 0 ? 1 : ev->wheel.y < 0 ? -1 : 0;
         if (dir) {
             SDL_Keymod mod = SDL_GetModState();
-            rack_nudge(rack, voice, dir, (mod & KMOD_SHIFT) ? 0.1 : (mod & KMOD_CTRL) ? 10.0 : 1.0);
+            rack_nudge(rack, voice, dir, (mod & SDL_KMOD_SHIFT) ? 0.1 : (mod & SDL_KMOD_CTRL) ? 10.0 : 1.0);
         }
         return 1;
     }

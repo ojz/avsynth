@@ -47,8 +47,9 @@ expressed in it. That settled the question.
 - Presets: ten slots of knob values per chain. Save, load, switch instantly.
 - Projects: one SQLite file holding chains and their presets, in the per-user
   app data folder by default.
-- Cross-platform C11 with CMake and pkg-config; same source on Arch Linux and
-  MSYS2/UCRT64. Platform code only in the capture-source selection.
+- Cross-platform C17 with CMake and pkg-config; same source on Arch Linux and
+  MSYS2/UCRT64. Platform code only in the capture-source selection. (C11 and
+  SDL2 through 2026-09-04; unified with the rest of the lab in ROADMAP P1/P2.)
 - Low latency. Frames are dropped, never queued.
 
 **Later (designed for, not built)**
@@ -183,7 +184,7 @@ so a preset survives edits to other parts of the text. A v0.1 file opens fine;
 its old tables are ignored and the new ones added beside them.
 
 **Dependencies.** libavfilter, libavutil, libavformat, libavcodec,
-libavdevice, SDL2, SDL2_ttf, SQLite3. CMake, pkg-config, C11, no C++.
+libavdevice, SDL3, SDL3_ttf, SQLite3. CMake, pkg-config, C17, no C++.
 
 ## 5. Starter chains
 
@@ -272,8 +273,11 @@ control surface later, not by hiding features now.
   chain presets match how the rig's presets were actually organised.
 - **Project file in app data, `--project` overrides.** The user's call.
   Export as text is the git-friendly path if wanted later.
-- **SDL2, not SDL3. SQLite, not JSON. C11, CMake, pkg-config. Frames dropped,
-  not queued.** Unchanged from v0.1.
+- **SDL3, SQLite not JSON, CMake and pkg-config, frames dropped not queued.**
+  v0.1 and v0.2 specified SDL2 and C11 because that was what this app needed
+  alone. Sharing a repository with Drone Commander settled it the other way:
+  one windowing API and one C standard across the lab (ROADMAP D1, D2, D5).
+  Ported 2026-09-04.
 - **Validate on a throwaway graph before replacing the voice.** A typo in the
   editor must never kill the picture.
 

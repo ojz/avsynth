@@ -22,7 +22,7 @@ struct Options {
     int  sel;            /* ROW_CAPTURE or ROW_FIRST_CHAIN + i */
     int  renaming;       /* typing a new name for the selected chain */
     char name[64];
-    Uint32 delete_armed_until;
+    Uint64 delete_armed_until;
 };
 
 Options *options_create(Hud *hud)
@@ -69,7 +69,7 @@ void options_open(Options *o)
 
 void options_close(Options *o)
 {
-    if (o->renaming) SDL_StopTextInput();
+    if (o->renaming) hud_text_input(o->hud, 0);
     o->open = 0;
     o->renaming = 0;
 }
@@ -87,16 +87,16 @@ int options_handle_event(Options *o, const SDL_Event *ev, OptResult *out)
 
     if (o->renaming) {
         switch (ev->type) {
-        case SDL_TEXTINPUT:
+        case SDL_EVENT_TEXT_INPUT:
             if (strlen(o->name) + strlen(ev->text.text) < sizeof o->name) strcat(o->name, ev->text.text);
             return OPT_CONSUMED;
-        case SDL_KEYUP:
+        case SDL_EVENT_KEY_UP:
             return OPT_CONSUMED;
-        case SDL_KEYDOWN:
-            switch (ev->key.keysym.sym) {
+        case SDL_EVENT_KEY_DOWN:
+            switch (ev->key.key) {
             case SDLK_ESCAPE:
                 o->renaming = 0;
-                SDL_StopTextInput();
+                hud_text_input(o->hud, 0);
                 return OPT_CONSUMED;
             case SDLK_BACKSPACE:
                 if (o->name[0]) o->name[strlen(o->name) - 1] = 0;
@@ -105,7 +105,7 @@ int options_handle_event(Options *o, const SDL_Event *ev, OptResult *out)
             case SDLK_KP_ENTER: {
                 int i = selected_chain(o);
                 o->renaming = 0;
-                SDL_StopTextInput();
+                hud_text_input(o->hud, 0);
                 if (i < 0 || !o->name[0]) return OPT_CONSUMED;
                 out->chain_id = o->chains[i].id;
                 snprintf(out->name, sizeof out->name, "%s", o->name);
@@ -119,11 +119,11 @@ int options_handle_event(Options *o, const SDL_Event *ev, OptResult *out)
         }
     }
 
-    if (ev->type == SDL_KEYUP || ev->type == SDL_TEXTINPUT) return OPT_CONSUMED;
-    if (ev->type != SDL_KEYDOWN) return OPT_NONE;
+    if (ev->type == SDL_EVENT_KEY_UP || ev->type == SDL_EVENT_TEXT_INPUT) return OPT_CONSUMED;
+    if (ev->type != SDL_EVENT_KEY_DOWN) return OPT_NONE;
 
     int i = selected_chain(o);
-    switch (ev->key.keysym.sym) {
+    switch (ev->key.key) {
     case SDLK_ESCAPE:
         return OPT_CLOSE;
     case SDLK_UP:
@@ -137,7 +137,7 @@ int options_handle_event(Options *o, const SDL_Event *ev, OptResult *out)
     case SDLK_LEFT:
     case SDLK_RIGHT:
         if (o->sel == ROW_CAPTURE) {
-            int fps = o->fps + (ev->key.keysym.sym == SDLK_RIGHT ? 5 : -5);
+            int fps = o->fps + (ev->key.key == SDLK_RIGHT ? 5 : -5);
             if (fps < 5) fps = 5;
             if (fps > 60) fps = 60;
             if (fps != o->fps) { out->fps = fps; return OPT_SET_FPS; }
@@ -148,21 +148,21 @@ int options_handle_event(Options *o, const SDL_Event *ev, OptResult *out)
         if (o->sel == ROW_CAPTURE) return OPT_PICK_REGION;
         if (i >= 0) { out->chain_id = o->chains[i].id; return OPT_SWITCH_CHAIN; }
         break;
-    case SDLK_c:
+    case SDLK_C:
         return OPT_PICK_REGION;
-    case SDLK_n:
+    case SDLK_N:
         return OPT_NEW_CHAIN;
-    case SDLK_r:
+    case SDLK_R:
         if (i >= 0) {
             o->renaming = 1;
             snprintf(o->name, sizeof o->name, "%s", o->chains[i].name);
-            SDL_StartTextInput();
+            hud_text_input(o->hud, 1);
         }
         break;
     case SDLK_DELETE:
         if (i < 0) break;
         if (o->nchains <= 1) break;
-        if (o->delete_armed_until && !SDL_TICKS_PASSED(SDL_GetTicks(), o->delete_armed_until)) {
+        if (o->delete_armed_until && SDL_GetTicks() < o->delete_armed_until) {
             o->delete_armed_until = 0;
             out->chain_id = o->chains[i].id;
             return OPT_DELETE_CHAIN;
@@ -204,7 +204,7 @@ void options_draw(Options *o, SDL_Renderer *ren, int W, int H)
     hud_text(hud, x, y, HUD_DIM, line);
     y += rowh;
 
-    int armed = o->delete_armed_until && !SDL_TICKS_PASSED(SDL_GetTicks(), o->delete_armed_until);
+    int armed = o->delete_armed_until && SDL_GetTicks() < o->delete_armed_until;
     for (int i = 0; i < o->nchains && y + rowh <= body.y + body.h; i++) {
         int row = ROW_FIRST_CHAIN + i;
         int sel = row == o->sel;

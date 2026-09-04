@@ -2,7 +2,7 @@
 #define VSYNTH_WINDOW_H
 
 #include <stdint.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 /*
  * Borderless output window with app-implemented move and resize.
@@ -35,6 +35,8 @@ int     window_save_bmp(Window *win, const char *path);
 
 /* Renderer, for building textures (HUD atlas). */
 SDL_Renderer *window_renderer(Window *win);
+/* The window itself, for the SDL3 calls that need it (text input). */
+SDL_Window   *window_sdl(Window *win);
 
 /* Overlay drawn on top of every presented frame, in window pixel coordinates. */
 typedef void (*WindowOverlayFn)(SDL_Renderer *ren, int w, int h, void *ud);

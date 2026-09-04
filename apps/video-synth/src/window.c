@@ -32,33 +32,32 @@ Window *window_create(const char *title, int x, int y, int w, int h)
 
     /* Keep rendering while the window is being moved; we own the move loop anyway. */
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 
-    win->sdl = SDL_CreateWindow(title,
-                                x < 0 ? (int)SDL_WINDOWPOS_CENTERED : x,
-                                y < 0 ? (int)SDL_WINDOWPOS_CENTERED : y,
-                                w, h,
-                                SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI);
+    /* SDL3 creates the window at a size and places it afterwards. */
+    win->sdl = SDL_CreateWindow(title, w, h,
+                                SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!win->sdl) {
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         free(win);
         return NULL;
     }
+    SDL_SetWindowPosition(win->sdl,
+                          x < 0 ? (int)SDL_WINDOWPOS_CENTERED : x,
+                          y < 0 ? (int)SDL_WINDOWPOS_CENTERED : y);
 
-    win->ren = SDL_CreateRenderer(win->sdl, -1,
-                                  SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!win->ren)
-        win->ren = SDL_CreateRenderer(win->sdl, -1, 0);
+    win->ren = SDL_CreateRenderer(win->sdl, NULL);
     if (!win->ren) {
         fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
         SDL_DestroyWindow(win->sdl);
         free(win);
         return NULL;
     }
+    /* vsync is a renderer property in SDL3, not a creation flag. Failing to get
+     * it is not fatal: we throttle on the capture fps anyway. */
+    SDL_SetRenderVSync(win->ren, 1);
 
-    SDL_RendererInfo info;
-    if (SDL_GetRendererInfo(win->ren, &info) == 0)
-        fprintf(stderr, "renderer: %s\n", info.name);
+    const char *name = SDL_GetRendererName(win->ren);
+    fprintf(stderr, "renderer: %s\n", name ? name : "unknown");
 
     SDL_SetRenderDrawColor(win->ren, 0, 0, 0, 255);
     SDL_RenderClear(win->ren);
@@ -78,7 +77,7 @@ void window_destroy(Window *win)
 int window_handle_event(Window *win, const SDL_Event *ev)
 {
     switch (ev->type) {
-    case SDL_MOUSEBUTTONDOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
         if (win->fullscreen) return 0;
         if (ev->button.button == SDL_BUTTON_LEFT)
             win->drag = DRAG_MOVE;
@@ -86,17 +85,20 @@ int window_handle_event(Window *win, const SDL_Event *ev)
             win->drag = DRAG_RESIZE;
         else
             return 0;
-        SDL_GetGlobalMouseState(&win->grab_mx, &win->grab_my);
+        float gx, gy;
+        SDL_GetGlobalMouseState(&gx, &gy);   /* floats in SDL3; window geometry stays integer */
+        win->grab_mx = (int)gx;
+        win->grab_my = (int)gy;
         SDL_GetWindowPosition(win->sdl, &win->grab_wx, &win->grab_wy);
         SDL_GetWindowSize(win->sdl, &win->grab_ww, &win->grab_wh);
-        SDL_CaptureMouse(SDL_TRUE);
+        SDL_CaptureMouse(true);
         return 1;
 
-    case SDL_MOUSEMOTION: {
+    case SDL_EVENT_MOUSE_MOTION: {
         if (win->drag == DRAG_NONE) return 0;
-        int mx, my;
-        SDL_GetGlobalMouseState(&mx, &my);
-        int dx = mx - win->grab_mx, dy = my - win->grab_my;
+        float fmx, fmy;
+        SDL_GetGlobalMouseState(&fmx, &fmy);
+        int dx = (int)fmx - win->grab_mx, dy = (int)fmy - win->grab_my;
         if (win->drag == DRAG_MOVE) {
             SDL_SetWindowPosition(win->sdl, win->grab_wx + dx, win->grab_wy + dy);
         } else {
@@ -108,16 +110,16 @@ int window_handle_event(Window *win, const SDL_Event *ev)
         return 1;
     }
 
-    case SDL_MOUSEBUTTONUP:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
         if (win->drag == DRAG_NONE) return 0;
         win->drag = DRAG_NONE;
-        SDL_CaptureMouse(SDL_FALSE);
+        SDL_CaptureMouse(false);
         return 1;
 
-    case SDL_WINDOWEVENT:
-        if (ev->window.event == SDL_WINDOWEVENT_EXPOSED ||
-            ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
-            window_present(win);
+    /* SDL3 gives each window change its own event type. */
+    case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        window_present(win);
         return 0;
 
     default:
@@ -135,6 +137,8 @@ void window_present_frame(Window *win, const uint8_t *bgra, int w, int h, int st
             fprintf(stderr, "SDL_CreateTexture: %s\n", SDL_GetError());
             return;
         }
+        /* SDL3 dropped the render-scale-quality hint; smoothing is per texture. */
+        SDL_SetTextureScaleMode(win->tex, SDL_SCALEMODE_LINEAR);
         win->tex_w = w;
         win->tex_h = h;
     }
@@ -147,16 +151,17 @@ void window_present(Window *win)
 {
     SDL_RenderClear(win->ren);
     if (win->has_frame)
-        SDL_RenderCopy(win->ren, win->tex, NULL, NULL);
+        SDL_RenderTexture(win->ren, win->tex, NULL, NULL);
     if (win->overlay) {
         int w, h;
-        SDL_GetRendererOutputSize(win->ren, &w, &h);
+        SDL_GetRenderOutputSize(win->ren, &w, &h);
         win->overlay(win->ren, w, h, win->overlay_ud);
     }
     SDL_RenderPresent(win->ren);
 }
 
 SDL_Renderer *window_renderer(Window *win) { return win->ren; }
+SDL_Window   *window_sdl(Window *win)      { return win->sdl; }
 
 void window_set_overlay(Window *win, WindowOverlayFn fn, void *ud)
 {
@@ -178,23 +183,22 @@ void window_set_title(Window *win, const char *title)
 void window_toggle_fullscreen(Window *win)
 {
     win->fullscreen = !win->fullscreen;
-    SDL_SetWindowFullscreen(win->sdl, win->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    /* SDL3 fullscreen is a bool; borderless desktop is the default mode. */
+    SDL_SetWindowFullscreen(win->sdl, win->fullscreen);
 }
 
 int window_save_bmp(Window *win, const char *path)
 {
-    int w, h;
-    SDL_GetRendererOutputSize(win->ren, &w, &h);
-    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!s) return -1;
     window_present(win);   /* redraw so the read-back sees a complete frame */
-    if (SDL_RenderReadPixels(win->ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) != 0) {
+    /* SDL3 hands back a fresh surface instead of filling one we allocated. */
+    SDL_Surface *s = SDL_RenderReadPixels(win->ren, NULL);
+    if (!s) {
         fprintf(stderr, "screenshot: %s\n", SDL_GetError());
-        SDL_FreeSurface(s);
         return -1;
     }
-    int rc = SDL_SaveBMP(s, path);
-    SDL_FreeSurface(s);
+    int rc = SDL_SaveBMP(s, path) ? 0 : -1;
+    SDL_DestroySurface(s);
     if (rc == 0) fprintf(stderr, "screenshot saved: %s\n", path);
+    else         fprintf(stderr, "screenshot: %s\n", SDL_GetError());
     return rc;
 }
