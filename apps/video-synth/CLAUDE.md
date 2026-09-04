@@ -1,12 +1,12 @@
 # vsynth
 
-C11 video feedback synthesizer: screen region -> user-written libavfilter chain with knobs derived
+C17 video feedback synthesizer: screen region -> user-written libavfilter chain with controls derived
 from the text -> borderless SDL2 window you drag into the capture region. Chains and presets in a
 SQLite project file. PRD.md is the design doc, README.md has the build steps, chain rules and key
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
 CLAUDE.md holds the ffplay-era environment notes).
 
-**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Run every command below from this folder, not the repo root; the root CMake only builds it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 dev libs. The repo-wide plan is `../../ROADMAP.md`: phase 1 moves the build to the root (`make run-vsynth`), phase 2 ports this app to SDL3, phases 3 and 4 move the parameter model, SQLite store and sheet UI into `shared/`. Until a phase lands, this file describes the truth.
+**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** The root Makefile provides `make build-vsynth` and `make run-vsynth`; direct CMake commands may still be run from this folder. The root CMake includes it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 development libraries. The repo-wide plan is `../../ROADMAP.md`: phase 2 ports this app to SDL3, while later phases move the parameter model, SQLite store and sheet UI into `shared/`. Until a phase lands, this file describes the truth.
 
 ## Build and run (Windows)
 
@@ -14,8 +14,8 @@ Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 9 dev libs, SDL2, 
 tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so use absolute paths:
 
 ```sh
-/c/msys64/usr/bin/bash -lc 'export PATH=/ucrt64/bin:$PATH; cmake --build /c/dev/avsynth/apps/video-synth/build'
-PATH="/c/msys64/ucrt64/bin:$PATH" ./build/vsynth.exe --selftest --project /tmp/t.vsynth
+make build-vsynth
+make run-vsynth
 ```
 
 From PowerShell the DLLs need `C:\msys64\ucrt64\bin` on PATH. There is no `python` on this machine;

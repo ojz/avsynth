@@ -9,7 +9,7 @@ for the design.
 ## Build
 
 Dependencies: libavfilter/libavformat/libavcodec/libavdevice/libavutil, SDL2, SDL2_ttf,
-SQLite3, CMake, Ninja, pkg-config, a C11 compiler.
+SQLite3, CMake, Ninja, pkg-config, a C17 compiler.
 
 **Arch Linux**
 

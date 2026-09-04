@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  drone-commander:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,3 +40,52 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/drone-commander-windows.zip
+
+  video-synth:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-SDL2_ttf
+            mingw-w64-ucrt-x86_64-sqlite3
+
+      - name: Configure and build
+        shell: msys2 {0}
+        run: |
+          cmake -S apps/video-synth -B build/video-synth -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/video-synth --parallel
+
+      - name: Collect runtime
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist/vsynth
+          cp build/video-synth/vsynth.exe apps/video-synth/README.md dist/vsynth/
+          ldd build/video-synth/vsynth.exe | awk '/\/ucrt64\/bin/ { print $3 }' | while read -r dll; do
+            cp "$dll" dist/vsynth/
+          done
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive dist/vsynth/* dist/vsynth-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsynth-windows
+          path: dist/vsynth-windows.zip
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/vsynth-windows.zip

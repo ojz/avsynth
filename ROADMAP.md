@@ -19,9 +19,9 @@ must record:
 - **Instruments are small desktop boxes.** An empty ammo crate, a folded sheet
   of aluminium, whatever is at hand. Eurorack is allowed for a module that
   really wants to be one, but it is not the standard and nothing depends on it.
-- **Power is a daisy chain**, guitar-pedal style: one 9 V or 12 V DC supply,
-  barrel jacks, several boxes on one chain. Each board makes whatever rails it
-  needs from that.
+- **The target input is USB-C 5 V power.** Each board makes the clean analog
+  rails it needs from that input and keeps switching noise out of the signal
+  path. Audio instruments expose a 3.5 mm line/headphone output as appropriate.
 - **The analog instruments stay analog.** The digital program is the
   sketchbook: it settles the topology, the ranges, the modulation behaviour and
   how the controls should feel. It is not firmware.
@@ -48,17 +48,17 @@ merge stopped at moving the files:
 | | Drone Commander | vsynth |
 |---|---|---|
 | Domain | 3-oscillator audio drone synth | screen region through a libavfilter chain, video feedback |
-| Standard | C17 | C11 |
+| Standard | C17 | C17 |
 | Window / input | SDL3 3.2.10, fetched from GitHub by CMake FetchContent, static | SDL2 + SDL2_ttf from system pkg-config |
 | Other libraries | none | ffmpeg (avfilter, avformat, avcodec, avdevice, avutil), sqlite3 |
 | Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | knobs derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
 | UI | fixed 1180x760 panel, sliders and switches, SDL debug text | modal sheet with F-key tabs, knob rows, text editor, filter browser, glyph atlas from SDL2_ttf |
-| Root build | default target, only app in CI and packaging | optional (`AVSYNTH_BUILD_VIDEO_SYNTH=OFF`), built from its own folder |
+| Root build | default `make`/`make run`, built and tested in CI | `make build-vsynth`/`make run-vsynth`, optional CMake target, separate CI artifact |
 
-Root `make run` only knows Drone Commander, and on the development machine the
-root Makefile cannot run at all: it expects GNU make and a winget CMake that are
-not installed, while the only working toolchain is MSYS2 UCRT64.
+Root `make` and `make run` deliberately retain Drone Commander as the default
+for compatibility. Explicit targets address either app, and `make build-all`
+builds both when the optional video dependencies are installed.
 
 ## 4. Decisions
 
@@ -95,14 +95,22 @@ Storage was the suggested first cut. Extracting it forces the parameter model
 out first, because a preset is a list of parameter values, so param and store
 land together.
 
-**D5. C17 for every app and shared library. No C++.** vsynth's move from C11
-to C17 is a flag change.
+**D5. C17 for every app and shared library. No C++.** Both app build files now
+enforce C17.
 
 **D6. Hardware handoff is a document, not code.** When an instrument is
 chosen for hardware, its app gets a `HARDWARE.md`: the topology as blocks, the
 parameter ranges the software settled on, candidate circuits per block, the
 power budget, and the parts strategy (see section 7). The software never grows
 a firmware target.
+
+**D7. Apps share a control plane, not a process or audio callback.** The native
+link protocol will use OSC-compatible UDP messages over localhost or LAN with
+stable paths and monotonic timestamps. It carries transport state, clock/phase,
+LFO reset and parameter changes. Each app receives packets on a network thread
+and forwards bounded events to its real-time engine; no socket call occurs on
+an audio callback. MIDI clock/control, PipeWire and JACK are adapters at the
+edge. Audio and video routing remain separate concerns.
 
 ## 5. Shared architecture
 
@@ -221,17 +229,25 @@ picker are the sensitive spots. Exit: `vsynth --selftest` passes and
 - Exit: both apps save and load presets through the same code; vsynth
   selftest still round-trips a preset.
 
-**P4. `shared/ui`.** Move the sheet, modes, knob rows, glyph atlas and
-notices out of vsynth's `hud.c`. Drone Commander's panel becomes knob rows in
+**P4. `shared/ui`.** Move the sheet, modes, slider/control rows, glyph atlas and
+notices out of vsynth's `hud.c`. Drone Commander's panel becomes slider rows in
 the sheet plus its own oscilloscope area, with the same keys as vsynth: Tab to
 select, arrows to nudge, Space to toggle, F-keys for modes, F12 screenshot.
 Exit: both apps look and drive the same, per-app code is only what differs.
 
 **P5. Hardware handoff.** `HARDWARE.md` template and the first one for Drone
 Commander: blocks (3 VCO, mixer with soft clip, VCF, VCA, 3 square LFO with
-sync), ranges taken from the Param table, candidate circuits, power budget on
-a 9 V or 12 V chain, JLCPCB part picks. Also the point where the parts
+sync), ranges taken from the Param table, candidate circuits, USB-C input and
+internal rail power budget, 3.5 mm output stage, JLCPCB part picks. Also the point where the parts
 strategy in section 7 gets tested against a real BOM.
+
+**P6. Cross-app clock and modulation link.** Define the OSC-compatible message
+schema and monotonic timestamp model, then implement a UDP control thread and
+bounded event queue in both apps. First acceptance test: two Drone Commander
+processes share transport and LFO resets without phase depending on packet
+arrival jitter. Second: vsynth maps received controls to its runtime parameter
+model. Add MIDI clock and PipeWire/JACK adapters only after the native protocol
+is deterministic and observable.
 
 **Later, in no order.** MIDI learn on the Param model (RtMidi or PortMidi;
 every Param already has min, max and step, so a 7-bit CC maps with no extra
@@ -247,10 +263,12 @@ Starting rules, to be corrected by the first real board:
   committing a topology to a part.
 - **Hand soldering budget:** panel parts only. Pots, jacks and switches are
   through-hole or panel-mount and wired; everything else is SMT on the board.
-- **Power:** one DC barrel input per box, 9 V or 12 V, daisy-chainable.
-  Pick one polarity convention for the whole lab and protect every board
-  against the other one. Bipolar rails, when a circuit wants them, come from
-  an on-board charge pump or inverter, never from a second supply.
+- **Power:** USB-C receptacle as a 5 V sink, with correct CC resistors and input
+  protection. Bipolar or higher-voltage analog rails come from filtered on-board
+  conversion. Validate available current, converter noise, headroom and thermal
+  behavior before selecting the circuit.
+- **Output:** 3.5 mm audio jack with an output buffer, AC coupling where needed,
+  safe level limiting and protection appropriate to line or headphone use.
 - **Enclosures:** desktop boxes. Panel layout and board outline are designed
   per box, not per rack standard. A eurorack variant is a different panel and
   power header on the same board, if ever.
@@ -261,8 +279,8 @@ Starting rules, to be corrected by the first real board:
 
 To settle with the user before the phase that needs them:
 
-1. Supply voltage and polarity convention for the daisy chain (9 V
-   centre-negative like pedals, or 12 V). Needed by P5.
+1. Which USB-C rail topology best meets the measured headroom and noise budget:
+  virtual ground, boosted single rail or generated bipolar rails. Needed by P5.
 2. Which instrument goes to hardware first. Drone Commander is the obvious
    candidate; needed by P5.
 3. Whether the per-app project files should merge into one lab-wide file

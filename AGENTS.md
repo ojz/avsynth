@@ -23,6 +23,21 @@ decision has to change, change it there in the same commit.
   `apps/video-synth/CLAUDE.md` for vsynth's environment and code rules,
   `HARDWARE.md` per app once it goes to hardware.
 
+## Cross-app connectivity
+
+- Keep audio/video transport separate from control synchronization.
+- The planned native control plane is OSC-compatible UDP, usable over localhost
+  or a LAN. Messages carry monotonic timestamps and stable addresses for
+  transport clock, phase, reset and parameter changes.
+- Socket I/O runs on an application-owned network thread. It publishes bounded
+  events to real-time code through a non-blocking queue; audio callbacks never
+  call networking APIs.
+- Followers run their own clocks and correct phase from timestamped updates;
+  packet arrival time is not the clock. Late UDP updates may be dropped.
+- MIDI clock/control and PipeWire or JACK are adapters for external systems,
+  not the repository's internal protocol. Do not couple apps through shared
+  audio buffers before a real audio-routing requirement exists.
+
 ## Language and dependencies
 
 - C17, readable, for every app and shared library. No C++.
@@ -72,6 +87,9 @@ Signal path, extended in small audible steps:
   their limits next to the code.
 - `tanhf` is the soft-saturation primitive. Do not call it an analog model.
 - Oversample nonlinear stages only after tests or listening show the need.
+- Continuous on-screen parameters use mouse-friendly sliders. Each bipolar
+  square LFO has a red/green phase indicator: red for negative, green for
+  positive.
 
 Real-time rules for the audio callback, without exception:
 
@@ -110,8 +128,8 @@ transistor, diode, OTA or op-amp saturation stages. Account for tolerances,
 noise, headroom, tracking, stability, power rails and safe signal levels.
 
 Design for the constraints in ROADMAP section 7: machine-assembled SMT boards,
-hand soldering only for panel parts, one daisy-chained 9 V or 12 V DC supply
-with rails generated on board, desktop enclosures.
+hand soldering only for panel parts, USB-C 5 V power input with required analog
+rails generated on board, 3.5 mm audio output and desktop enclosures.
 
 Do not pick a circuit because it resembles the digital implementation. Every
 circuit is evaluated as an analog design and validated by simulation,
