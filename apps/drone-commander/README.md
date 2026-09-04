@@ -13,23 +13,21 @@ output is required to explore the controls.
 
 ## Build
 
-Requirements: CMake 3.24 or newer, Git, and a C17 compiler (MinGW).
+Requirements: CMake 3.24 or newer, Ninja, Git and a C17 compiler. On Windows
+that is the MSYS2 UCRT64 toolchain (`pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja}`).
+The first configure fetches and builds SDL3 from GitHub, which takes a couple of minutes.
 
-You can build and run using `make`:
+From the repository root:
 
-```powershell
-make build
-make run
-```
-
-Or invoke CMake directly:
-
-```powershell
-cmake -S . -B build -G "MinGW Makefiles"
-cmake --build build
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ./drone_commander.exe
 ```
+
+The unified `make` targets (`make run-drone` and friends) arrive with phase 1
+of the [roadmap](../../ROADMAP.md).
 
 ## Controls
 

@@ -6,11 +6,11 @@ SQLite project file. PRD.md is the design doc, README.md has the build steps, ch
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
 CLAUDE.md holds the ffplay-era environment notes).
 
-**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Run every command below from this folder, not the repo root; the root CMake only builds it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 dev libs.
+**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Run every command below from this folder, not the repo root; the root CMake only builds it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 dev libs. The repo-wide plan is `../../ROADMAP.md`: phase 1 moves the build to the root (`make run-vsynth`), phase 2 ports this app to SDL3, phases 3 and 4 move the parameter model, SQLite store and sheet UI into `shared/`. Until a phase lands, this file describes the truth.
 
 ## Build and run (Windows)
 
-Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 8 dev libs, SDL2, SDL2_ttf, sqlite3). The Bash
+Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 9 dev libs, SDL2, SDL2_ttf, sqlite3). The Bash
 tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so use absolute paths:
 
 ```sh

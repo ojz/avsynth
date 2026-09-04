@@ -1,86 +1,118 @@
-# avsynth Agent Instructions
+# avsynth agent instructions
 
-## Git Workflow
+Read [ROADMAP.md](ROADMAP.md) first. It holds the vision, the decisions
+(numbered D1 to D6) and the phases. Do not re-decide what it decides; if a
+decision has to change, change it there in the same commit.
 
-- Work directly on `main`; do not create feature branches unless the user explicitly requests one.
-- After completing and validating repository changes, commit them on `main` and push to the configured GitHub remote.
-- Use the repository-local Git author configuration. Never force-push or rewrite published history unless explicitly requested.
+## Git workflow
 
-## Project Direction
+- Work directly on `main`; no feature branches unless the user asks for one.
+- After completing and validating a change, commit it on `main` and push to
+  the GitHub remote.
+- Use the repository-local Git author configuration (the personal address, not
+  the work one). Never force-push or rewrite published history unless asked.
 
-The repository contains independent audiovisual synthesizer applications under `apps/`. Keep each application self-contained and put shared code under `shared/` only after at least two applications genuinely use it.
+## Repository shape
 
-Drone Commander has two related but separate implementations:
+- One instrument per directory under `apps/`. Each app is self-contained: its
+  own README, sources under `src/`, tests under `tests/`.
+- `shared/` holds code that at least two apps genuinely use. Extract, do not
+  pre-build: the order is `param`, `store`, `ui` (ROADMAP D4).
+- Docs live next to what they describe: app READMEs for controls and signal
+  paths, `apps/video-synth/PRD.md` for vsynth's design,
+  `apps/video-synth/CLAUDE.md` for vsynth's environment and code rules,
+  `HARDWARE.md` per app once it goes to hardware.
 
-1. A digital synthesizer used to learn DSP and explore signal paths.
+## Language and dependencies
+
+- C17, readable, for every app and shared library. No C++.
+- SDL3 for window, input, rendering, audio device, timing and lifecycle.
+  vsynth is on SDL2 until phase 2; do not add new SDL2-only code there.
+- CMake with Ninja and pkg-config for system libraries. Toolchain is MSYS2
+  UCRT64 on Windows and pacman on Arch (ROADMAP D1).
+- Do not introduce SuperCollider, Faust, or another synthesis language.
+- Keep dependencies minimal and justify any new one. FFmpeg belongs to vsynth's
+  filter path and, later, to recording; it never enters an audio DSP path.
+- Write stateful units as explicit structs with processing functions. Clear
+  names and straight data flow over object patterns or opaque abstractions.
+
+## Drone Commander
+
+Two related but separate implementations exist:
+
+1. The digital synthesizer in `apps/drone-commander`, used to learn DSP and
+   explore signal paths.
 2. A fully analog hardware synthesizer informed by those experiments.
 
-The hardware version must remain fully analog. Do not propose running the digital DSP engine on the hardware. Digital experiments may guide topology, parameter ranges, modulation behavior, and circuit choices, but they are not the hardware implementation.
+The hardware stays fully analog. Never propose running the DSP engine on the
+hardware. Digital experiments guide topology, parameter ranges, modulation
+behaviour and circuit choices; they are not the hardware.
 
-## Language and Dependencies
+Architecture:
 
-- Write the application and DSP engine in readable C17.
-- Do not introduce C++.
-- Use SDL3 for the window, input, rendering, audio-device access, timing, and application lifecycle.
-- Do not introduce SuperCollider, Faust, or another synthesis language.
-- Keep FFmpeg optional and outside the real-time DSP path. It may later support recording, encoding, streaming, or export.
-- Keep dependencies minimal and justify any new dependency before adding it.
-- Use CMake as the build system when the project is scaffolded.
+- A platform-independent DSP engine in standard C (`dsp.c`). It must not
+  depend on SDL, FFmpeg, SQLite or `shared/ui`.
+- An SDL application shell that owns devices, controls, visualization and
+  parameter updates.
+- The engine renders both real-time audio buffers and offline test buffers.
+  Floating-point samples, oscillator phase kept in `[0, 1)`.
 
-## Architecture
-
-Separate the program into two layers:
-
-- A platform-independent DSP engine written in standard C. It must not depend on SDL or FFmpeg.
-- An SDL application shell that owns devices, controls, visualization, and parameter updates.
-
-Represent stateful DSP units with explicit structs and processing functions. Prefer clear names and straightforward data flow over object-oriented patterns or opaque abstractions.
-
-Design the DSP engine so it can render both real-time audio buffers and offline test buffers. Use floating-point samples and keep oscillator phase bounded, normally in the range `[0, 1)`.
-
-## Signal Processing
-
-Implement and explain DSP incrementally. The initial signal path is:
+Signal path, extended in small audible steps:
 
 ```text
-3 oscillators -> mixer -> VCF -> VCA -> output
-                       ^      ^
-                       |      |
-                    square LFO
+3 oscillators -> mixer (tanhf drive) -> VCF -> VCA -> output
+                                         ^      ^
+                                    3 square LFOs, hard-sync chain
 ```
 
-Each oscillator has frequency and amplitude controls. The VCF has cutoff, cutoff-modulation depth, and resonance controls. The VCA has amplitude and amplitude-modulation depth controls. The square LFO has a rate control.
+- Phase-accumulator oscillators, explicit routing code, no generic node graph
+  until a recurring need earns one.
+- Aliasing is an explicit concern for discontinuous waveforms, FM, feedback and
+  nonlinearities. Simple implementations are fine while learning; document
+  their limits next to the code.
+- `tanhf` is the soft-saturation primitive. Do not call it an analog model.
+- Oversample nonlinear stages only after tests or listening show the need.
 
-- Begin with a phase-accumulator oscillator and make the implementation educational and easy to inspect.
-- Start with explicit processing code rather than a generic node graph or plugin architecture.
-- Make topology experiments, including oscillator count, FM, and cross-FM, by editing clear signal-routing code until recurring needs justify an abstraction.
-- Treat aliasing as an explicit engineering concern for discontinuous waveforms, FM, feedback, and nonlinear processing. Simple implementations are acceptable while learning, but document their limitations near the relevant work.
-- Use `tanhf` as the initial soft-saturation primitive where saturation is desired. Do not describe it as a complete analog model.
-- Consider oversampling nonlinear stages only after the basic signal path works and tests or listening demonstrate a need.
+Real-time rules for the audio callback, without exception:
 
-## Real-Time Rules
+- No allocation or freeing, no file or network I/O, no logging, no FFmpeg,
+  no mutex that can block, no rebuilding of routing or processing structures.
+- Control changes arrive through atomics or a small non-blocking queue.
+  Parameters that would click or zipper are smoothed.
+- Visualization data leaves through a bounded buffer; rendering never controls
+  audio timing.
 
-The audio callback must remain deterministic and bounded:
+Tests: bounded output, phase wrapping, parameter limits, deterministic offline
+rendering. Keep functions narrow enough for a C learner to follow.
 
-- Do not allocate or free memory.
-- Do not perform file or network I/O.
-- Do not log.
-- Do not call FFmpeg.
-- Do not take a mutex that can block.
-- Do not rebuild routing or processing structures.
+## vsynth
 
-Transfer control changes from the application thread using atomics or a small non-blocking queue. Smooth parameters whose abrupt changes would click or produce zipper noise. Send visualization data to the rendering thread through a bounded buffer; rendering must never control audio timing.
+Follow `apps/video-synth/CLAUDE.md` for build commands, environment facts and
+code rules. The rules that must survive any refactor:
 
-## Development Approach
+- A knob exists only for an option the user wrote in the chain text, whose
+  value is a plain number and whose AVOption is runtime-settable. No
+  hand-written module tables; use the `OVERRIDES` row in `rack.c` for bad
+  ranges.
+- Knob changes go through `avfilter_graph_send_command`; the graph is never
+  rebuilt for a knob.
+- Chain text is parsed into a throwaway graph before it replaces the running
+  one. A typo never kills the picture.
+- The window keeps painting during move and resize; the app owns the drag loop.
+- `vsynth --selftest` must keep passing. Run it after touching graph, rack,
+  project or voice code, with `--project` pointing at a scratch file.
 
-- Prefer small, audible milestones: one oscillator, gain, saturation, visualization, then additional oscillators, mixing, filtering, and modulation.
-- Keep functions and modules narrow enough for a C learner to follow.
-- Avoid premature frameworks, generalized graph engines, and hidden code generation.
-- Add focused tests for DSP behavior where practical, including bounded output, phase wrapping, parameter limits, and deterministic offline rendering.
-- Preserve a direct correspondence between digital blocks and candidate analog concepts, while noting where software behavior cannot be assumed to transfer directly to a circuit.
+## Hardware boundary (all instruments)
 
-## Analog Hardware Boundary
+When discussing or designing hardware, use analog building blocks: VCOs,
+op-amp or passive mixers, VCFs, VCAs or OTAs, comparator-based LFOs,
+transistor, diode, OTA or op-amp saturation stages. Account for tolerances,
+noise, headroom, tracking, stability, power rails and safe signal levels.
 
-When discussing or designing the hardware version, use analog building blocks such as VCOs, op-amp or passive mixers, VCFs, VCAs or OTAs, comparator-based LFOs, and transistor, diode, OTA, or op-amp saturation stages. Account for component tolerances, noise, headroom, tracking, stability, power rails, and safe signal levels.
+Design for the constraints in ROADMAP section 7: machine-assembled SMT boards,
+hand soldering only for panel parts, one daisy-chained 9 V or 12 V DC supply
+with rails generated on board, desktop enclosures.
 
-Do not select circuits solely because they resemble a digital implementation. Circuit choices must be evaluated as analog designs in their own right and validated through simulation, breadboarding, measurement, and listening.
+Do not pick a circuit because it resembles the digital implementation. Every
+circuit is evaluated as an analog design and validated by simulation,
+breadboarding, measurement and listening.

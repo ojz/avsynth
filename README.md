@@ -1,134 +1,73 @@
 # avsynth
 
-A collection of small audiovisual synthesizers and signal experiments. Each
-application is independently buildable while the repository root provides
-common build, test, release, and artifact conventions.
+A DIY synthesizer lab. Every instrument starts here as a small C program that
+tries out a topology, its ranges and a way of playing it. The ones worth
+keeping become hardware: machine-assembled SMT boards in small desktop boxes on
+a daisy-chained 9 V or 12 V supply, guitar-pedal style. The software is the
+sketchbook, not the firmware. [ROADMAP.md](ROADMAP.md) has the vision, the
+decisions and the plan.
 
 ## Applications
 
-| Application | Description | Documentation |
-| --- | --- | --- |
-| Drone Commander | C17/SDL3 three-oscillator drone synthesizer | [apps/drone-commander/README.md](apps/drone-commander/README.md) |
-| vsynth | C11/SDL2 video feedback synth: screen region through a libavfilter chain with knobs derived from the text | [apps/video-synth/README.md](apps/video-synth/README.md) |
+| Application | What it is | Docs |
+|---|---|---|
+| **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with FM cascade, state-variable filter, VCA and three synced square LFOs. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
+| **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Knobs are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
+
+Both are C, both use SDL for window, input and (for audio) the device, both
+build with CMake. They were developed separately and merged on 2026-09-04;
+unifying their toolchain, SDL version and UI is the current work, see the
+roadmap.
 
 ## Layout
 
 ```text
-apps/                    Independent synthesizer applications
-assets/screenshots/      Repository screenshots grouped by application
-dist/                    Local packaged builds (ignored by Git)
-.github/workflows/       CI builds and downloadable artifacts
+apps/drone-commander/   audio drone synth (C17, SDL3)
+apps/video-synth/       video feedback synth (C11, SDL2, ffmpeg, SQLite)
+shared/                 code used by more than one app (empty until phase 3)
+assets/screenshots/     screenshots per application
+.github/workflows/      CI: Windows build, test, artifacts, tagged releases
+ROADMAP.md              vision, decisions, phases
+AGENTS.md               rules for agents and contributors
 ```
 
-## Build
+## Building today
 
-The default root commands build and run Drone Commander. vsynth needs the MSYS2 ffmpeg/SDL2 dev
-libs, so build it from `apps/video-synth/` (see its README) or configure the root with
-`-DAVSYNTH_BUILD_VIDEO_SYNTH=ON`:
+The only toolchain in use is MSYS2 UCRT64 on Windows (pacman on Arch Linux
+works the same way). The unified root commands (`make`, `make run`,
+`make run-drone`, `make run-vsynth`) are phase 1 of the roadmap and do not
+exist yet; until then the two apps build separately.
 
-```powershell
-make build
-make run
-make test
+Install the toolchain once, from an MSYS2 UCRT64 shell:
+
+```sh
+pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,SDL2,SDL2_ttf,sqlite3}
 ```
 
-Audio starts hard-muted. See the application documentation for controls and
-signal-path details.
+**Drone Commander**, from the repository root. The first configure fetches and
+builds SDL3 from GitHub, which takes a couple of minutes:
 
-Every push and pull request builds and tests the Windows executable. Successful
-workflow runs publish a downloadable `drone-commander-windows` artifact. Version
-tags matching `v*` also create a GitHub release with the packaged executable.# Drone Commander
-
-A C17 synthesizer and signal-path laboratory hosted by SDL3. It is the digital
-sketchbook for a later, separate, fully analog hardware synthesizer.
-
-## Safety
-
-**Audio always starts hard-muted.** The SDL audio device is opened paused, and
-the audio callback does not run until you deliberately press `Ctrl+Shift+A` or
-click the `[HARD MUTED]` button on-screen. Press `Space` or click `[AUDIO LIVE]`
-at any time to mute immediately. The visualization runs while muted, so no audio
-output is required to explore the controls.
-
-## Build
-
-Requirements: CMake 3.24 or newer, Git, and a C17 compiler (MinGW).
-
-You can build and run using `make`:
-
-```powershell
-make build
-make run
-```
-
-Or invoke CMake directly:
-
-```powershell
-cmake -S . -B build -G "MinGW Makefiles"
-cmake --build build
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ./drone_commander.exe
 ```
 
-## Controls
+**vsynth**, from `apps/video-synth/`:
 
-- `Mouse`: drag knobs vertically; click waveform, sync, and anti-alias switches
-- `R`: reset all parameters to defaults
-- `Ctrl+Shift+A` or click banner: deliberately enable audio
-- `Space` or click banner: mute audio immediately
-- `Escape`: quit
+```sh
+cmake -B build -G Ninja
+cmake --build build
+./build/vsynth.exe
+```
 
-## Signal Path
+From PowerShell, put `C:\msys64\ucrt64\bin` on PATH first so the DLLs are
+found. Audio in Drone Commander starts hard-muted; see its README for the
+controls.
 
-### Oscillators
+## CI and releases
 
-3 oscillators with selectable waveforms (Sine, Saw, Square, Triangle), each with:
-
-- Frequency
-- Amplitude
-
-### FM Cascade
-
-Linear frequency modulation: Oscillator 1 modulates Oscillator 2, and Oscillator 2
-modulates Oscillator 3. When `FM CASCADE` is zero, oscillators remain independent;
-turning it up creates classic analog drone sidebands, sub-harmonics, and metallic timbres.
-
-### Anti-Aliasing (PolyBLEP)
-
-Toggleable between naive digital phase accumulation and polynomial band-limited
-step (PolyBLEP) correction for saw and square waves. Allows direct comparison of
-aliasing noise versus clean analog-like harmonic spectrums.
-
-### Parameter Smoothing
-
-One-pole lowpass filter smoothing on cutoff, resonance, VCA amplitude, drive, and FM depth
-to prevent clicks and zipper noise during real-time adjustments.
-
-### Mix
-
-Combines the three oscillators with adjustable `tanhf` soft-saturation drive.
-
-### VCF (Voltage-Controlled Filter)
-
-- Cutoff frequency
-- Cutoff frequency depth (modulated by LFO)
-- Resonance
-
-### VCA (Voltage-Controlled Amplifier)
-
-- Amplitude
-- Amplitude modulation depth (modulated by LFO)
-
-### Modulation (3 x Square LFO)
-
-Each LFO has an independent rate and level. Their level-weighted outputs are
-summed and routed to both the VCF and VCA modulation-depth controls.
-
-LFO 2 can hard-sync to LFO 1, and LFO 3 can hard-sync to LFO 2. A synced LFO
-resets its phase whenever the preceding LFO begins a new cycle. This corresponds
-to a reset pulse between comparator-based analog LFOs on the eventual hardware.
-
-### Oscilloscope & Metering
-
-- Zero-crossing triggered oscilloscope for a rock-solid, jitter-free visual trace
-- Peak VU meter with headroom warning indicator
+Every push and pull request builds and tests Drone Commander on Windows and
+publishes a `drone-commander-windows` artifact. Tags matching `v*` create a
+GitHub release with the zip. vsynth joins CI in phase 1.
