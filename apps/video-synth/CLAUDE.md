@@ -6,7 +6,7 @@ SQLite project file. PRD.md is the design doc, README.md has the build steps, ch
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
 CLAUDE.md holds the ffplay-era environment notes).
 
-**This folder is the project. Do not move or re-create it elsewhere.**
+**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Run every command below from this folder, not the repo root; the root CMake only builds it with `-DAVSYNTH_BUILD_VIDEO_SYNTH=ON` because it needs the MSYS2 ffmpeg/SDL2 dev libs.
 
 ## Build and run (Windows)
 
@@ -14,7 +14,7 @@ Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 8 dev libs, SDL2, 
 tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so use absolute paths:
 
 ```sh
-/c/msys64/usr/bin/bash -lc 'export PATH=/ucrt64/bin:$PATH; cmake --build /c/dev/vsynth/build'
+/c/msys64/usr/bin/bash -lc 'export PATH=/ucrt64/bin:$PATH; cmake --build /c/dev/avsynth/apps/video-synth/build'
 PATH="/c/msys64/ucrt64/bin:$PATH" ./build/vsynth.exe --selftest --project /tmp/t.vsynth
 ```
 

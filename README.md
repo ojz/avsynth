@@ -9,7 +9,7 @@ common build, test, release, and artifact conventions.
 | Application | Description | Documentation |
 | --- | --- | --- |
 | Drone Commander | C17/SDL3 three-oscillator drone synthesizer | [apps/drone-commander/README.md](apps/drone-commander/README.md) |
-| Video synth | Reserved for import from the companion project | `apps/video-synth/` |
+| vsynth | C11/SDL2 video feedback synth: screen region through a libavfilter chain with knobs derived from the text | [apps/video-synth/README.md](apps/video-synth/README.md) |
 
 ## Layout
 
@@ -22,7 +22,9 @@ dist/                    Local packaged builds (ignored by Git)
 
 ## Build
 
-The default root commands build and run Drone Commander:
+The default root commands build and run Drone Commander. vsynth needs the MSYS2 ffmpeg/SDL2 dev
+libs, so build it from `apps/video-synth/` (see its README) or configure the root with
+`-DAVSYNTH_BUILD_VIDEO_SYNTH=ON`:
 
 ```powershell
 make build
