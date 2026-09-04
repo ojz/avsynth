@@ -45,10 +45,19 @@ jobs:
       - name: Package
         run: make package BUILD_TYPE=Release
 
+      # One artifact per app, under the names downloads already use. They come
+      # out of a single job on purpose: both apps share one toolchain install
+      # and are built and tested together, so a divergence fails the build
+      # instead of passing in one job and failing in the other.
       - uses: actions/upload-artifact@v4
         with:
-          name: avsynth-windows
-          path: dist/*.zip
+          name: drone-commander-windows
+          path: dist/drone_commander-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsynth-windows
+          path: dist/vsynth-windows.zip
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')

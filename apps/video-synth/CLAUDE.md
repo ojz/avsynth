@@ -1,6 +1,6 @@
 # vsynth
 
-C17 video feedback synthesizer: screen region -> user-written libavfilter chain with knobs derived
+C17 video feedback synthesizer: screen region -> user-written libavfilter chain with controls derived
 from the text -> borderless SDL3 window you drag into the capture region. Chains and presets in a
 SQLite project file. PRD.md is the design doc, README.md has the build steps, chain rules and key
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
@@ -14,7 +14,7 @@ Toolchain is MSYS2 UCRT64 (gcc, cmake, ninja, pkgconf, ffmpeg 9 dev libs, SDL3, 
 the msys `make`). From PowerShell, `make` works directly because the Makefile puts `/ucrt64/bin` on PATH:
 
 ```powershell
-make run-vsynth      # or: make build, make test, make package
+make build-vsynth    # or: make run-vsynth, make build, make test, make package
 ```
 
 The Bash tool is Git Bash, not MSYS2, and the MSYS2 login shell starts in its own home, so from Bash

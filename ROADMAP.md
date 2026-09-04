@@ -1,7 +1,11 @@
 # avsynth roadmap
 
-*v1, 2026-09-04. The decisions below are made. The phases are ordered, not
+*v2, 2026-09-04. The decisions below are made. The phases are ordered, not
 scheduled. Update this file when a decision changes or a phase lands.*
+
+*Changed since v1, both on 2026-09-04: power moved from a 9/12 V pedal-style
+daisy chain to USB-C 5 V with analog rails made on board, D7 and P6 added for
+the cross-app control plane, and P1 and P2 landed.*
 
 ## 1. Vision
 
@@ -19,9 +23,9 @@ must record:
 - **Instruments are small desktop boxes.** An empty ammo crate, a folded sheet
   of aluminium, whatever is at hand. Eurorack is allowed for a module that
   really wants to be one, but it is not the standard and nothing depends on it.
-- **Power is a daisy chain**, guitar-pedal style: one 9 V or 12 V DC supply,
-  barrel jacks, several boxes on one chain. Each board makes whatever rails it
-  needs from that.
+- **The target input is USB-C 5 V power.** Each board makes the clean analog
+  rails it needs from that input and keeps switching noise out of the signal
+  path. Audio instruments expose a 3.5 mm line/headphone output as appropriate.
 - **The analog instruments stay analog.** The digital program is the
   sketchbook: it settles the topology, the ranges, the modulation behaviour and
   how the controls should feel. It is not firmware.
@@ -55,7 +59,7 @@ storage and the control surface are still per app.
 | Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | knobs derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
 | UI | fixed 1180x760 panel, sliders and switches, SDL debug text | modal sheet with F-key tabs, knob rows, text editor, filter browser, glyph atlas from SDL3_ttf |
-| Root build | `make run-drone`, in CI and packaging | `make run-vsynth`, in CI and packaging |
+| Root build | `make build-drone` / `make run-drone`, in CI and packaging | `make build-vsynth` / `make run-vsynth`, in CI and packaging |
 
 The merge on 2026-09-04 moved files but not build systems: each app had grown
 whatever toolchain its own machine happened to have, and CI gated only one of
@@ -78,8 +82,10 @@ SDL3_ttf. One windowing API means one shared UI layer. Drone Commander already
 targets SDL3, and MSYS2 and Arch both ship SDL3 and SDL3_ttf.
 
 **D3. Root make targets cover every app.** `make` builds everything, `make
-run` starts every app, `make run-drone` and `make run-vsynth` start one, `make
-test` runs every test, `make package` produces the zips. Executables land in
+run` starts every app, `make build-drone` and `make build-vsynth` build one,
+`make run-drone` and `make run-vsynth` run one, `make test` runs every test,
+`make package` produces the zips. The per-app targets select a CMake target
+inside the one project; they are not second build trees. Executables land in
 `build/bin/`. The Makefile has POSIX sh recipes and runs from the MSYS2 shell,
 from PowerShell with `C:\msys64\usr\bin` on PATH, and on Linux.
 
@@ -98,14 +104,23 @@ Storage was the suggested first cut. Extracting it forces the parameter model
 out first, because a preset is a list of parameter values, so param and store
 land together.
 
-**D5. C17 for every app and shared library. No C++.** vsynth's move from C11
-to C17 is a flag change.
+**D5. C17 for every app and shared library. No C++.** The root sets it once for
+everything, with compiler extensions on because the apps use POSIX `strdup`
+and `strncasecmp`.
 
 **D6. Hardware handoff is a document, not code.** When an instrument is
 chosen for hardware, its app gets a `HARDWARE.md`: the topology as blocks, the
 parameter ranges the software settled on, candidate circuits per block, the
 power budget, and the parts strategy (see section 7). The software never grows
 a firmware target.
+
+**D7. Apps share a control plane, not a process or audio callback.** The native
+link protocol will use OSC-compatible UDP messages over localhost or LAN with
+stable paths and monotonic timestamps. It carries transport state, clock/phase,
+LFO reset and parameter changes. Each app receives packets on a network thread
+and forwards bounded events to its real-time engine; no socket call occurs on
+an audio callback. MIDI clock/control, PipeWire and JACK are adapters at the
+edge. Audio and video routing remain separate concerns.
 
 ## 5. Shared architecture
 
@@ -245,17 +260,25 @@ SDL3_ttf. What the port turned on:
 - Exit: both apps save and load presets through the same code; vsynth
   selftest still round-trips a preset.
 
-**P4. `shared/ui`.** Move the sheet, modes, knob rows, glyph atlas and
-notices out of vsynth's `hud.c`. Drone Commander's panel becomes knob rows in
+**P4. `shared/ui`.** Move the sheet, modes, slider/control rows, glyph atlas and
+notices out of vsynth's `hud.c`. Drone Commander's panel becomes slider rows in
 the sheet plus its own oscilloscope area, with the same keys as vsynth: Tab to
 select, arrows to nudge, Space to toggle, F-keys for modes, F12 screenshot.
 Exit: both apps look and drive the same, per-app code is only what differs.
 
 **P5. Hardware handoff.** `HARDWARE.md` template and the first one for Drone
 Commander: blocks (3 VCO, mixer with soft clip, VCF, VCA, 3 square LFO with
-sync), ranges taken from the Param table, candidate circuits, power budget on
-a 9 V or 12 V chain, JLCPCB part picks. Also the point where the parts
+sync), ranges taken from the Param table, candidate circuits, USB-C input and
+internal rail power budget, 3.5 mm output stage, JLCPCB part picks. Also the point where the parts
 strategy in section 7 gets tested against a real BOM.
+
+**P6. Cross-app clock and modulation link.** Define the OSC-compatible message
+schema and monotonic timestamp model, then implement a UDP control thread and
+bounded event queue in both apps. First acceptance test: two Drone Commander
+processes share transport and LFO resets without phase depending on packet
+arrival jitter. Second: vsynth maps received controls to its runtime parameter
+model. Add MIDI clock and PipeWire/JACK adapters only after the native protocol
+is deterministic and observable.
 
 **Later, in no order.** MIDI learn on the Param model (RtMidi or PortMidi;
 every Param already has min, max and step, so a 7-bit CC maps with no extra
@@ -271,10 +294,12 @@ Starting rules, to be corrected by the first real board:
   committing a topology to a part.
 - **Hand soldering budget:** panel parts only. Pots, jacks and switches are
   through-hole or panel-mount and wired; everything else is SMT on the board.
-- **Power:** one DC barrel input per box, 9 V or 12 V, daisy-chainable.
-  Pick one polarity convention for the whole lab and protect every board
-  against the other one. Bipolar rails, when a circuit wants them, come from
-  an on-board charge pump or inverter, never from a second supply.
+- **Power:** USB-C receptacle as a 5 V sink, with correct CC resistors and input
+  protection. Bipolar or higher-voltage analog rails come from filtered on-board
+  conversion. Validate available current, converter noise, headroom and thermal
+  behavior before selecting the circuit.
+- **Output:** 3.5 mm audio jack with an output buffer, AC coupling where needed,
+  safe level limiting and protection appropriate to line or headphone use.
 - **Enclosures:** desktop boxes. Panel layout and board outline are designed
   per box, not per rack standard. A eurorack variant is a different panel and
   power header on the same board, if ever.
@@ -285,8 +310,8 @@ Starting rules, to be corrected by the first real board:
 
 To settle with the user before the phase that needs them:
 
-1. Supply voltage and polarity convention for the daisy chain (9 V
-   centre-negative like pedals, or 12 V). Needed by P5.
+1. Which USB-C rail topology best meets the measured headroom and noise budget:
+  virtual ground, boosted single rail or generated bipolar rails. Needed by P5.
 2. Which instrument goes to hardware first. Drone Commander is the obvious
    candidate; needed by P5.
 3. Whether the per-app project files should merge into one lab-wide file

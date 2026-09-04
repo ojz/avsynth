@@ -3,16 +3,16 @@
 A DIY synthesizer lab. Every instrument starts here as a small C program that
 tries out a topology, its ranges and a way of playing it. The ones worth
 keeping become hardware: machine-assembled SMT boards in small desktop boxes on
-a daisy-chained 9 V or 12 V supply, guitar-pedal style. The software is the
-sketchbook, not the firmware. [ROADMAP.md](ROADMAP.md) has the vision, the
-decisions and the plan.
+USB-C 5 V power, with the analog rails each circuit needs generated on-board.
+The software is the sketchbook, not the firmware. [ROADMAP.md](ROADMAP.md) has
+the vision, the decisions and the plan.
 
 ## Applications
 
 | Application | What it is | Docs |
 |---|---|---|
 | **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with FM cascade, state-variable filter, VCA and three synced square LFOs. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
-| **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Knobs are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
+| **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Controls are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
 
 Both are C17 on SDL3, built by one CMake project against system libraries from
 pkg-config. Nothing is vendored or downloaded at configure time, so both
@@ -51,10 +51,12 @@ every command below works from the MSYS2 shell and from PowerShell alike.
 ## Build and run
 
 ```sh
-make              # build every app
+make              # build every app (also: build, build-all)
 make run          # run every app
-make run-drone    # Drone Commander only
-make run-vsynth   # vsynth only
+make build-drone  # build Drone Commander only
+make build-vsynth # build vsynth only
+make run-drone    # run Drone Commander only
+make run-vsynth   # run vsynth only
 make test         # every test, through ctest
 make package      # zip each app with its DLLs into dist/
 make help         # the full list
@@ -75,7 +77,9 @@ has the chain syntax and the key map.
 ## CI and releases
 
 Every push and pull request builds and tests both apps on Windows in the same
-MSYS2 UCRT64 environment a developer uses, then publishes an
-`avsynth-windows` artifact holding one zip per app. Tags matching `v*` create a
-GitHub release with the same zips. Each zip carries the executable, its README
-and the DLLs it links, so it runs on a machine with no toolchain installed.
+MSYS2 UCRT64 environment a developer uses, then publishes
+`drone-commander-windows` and `vsynth-windows` artifacts. Tags matching `v*`
+create a GitHub release with the same zips. Each zip carries the executable,
+its README and the DLLs it links, so it runs on a machine with no toolchain
+installed. Both apps come out of one job on purpose: they share the toolchain
+install and are built together, so a divergence fails the build.

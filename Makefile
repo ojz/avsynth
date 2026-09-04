@@ -28,7 +28,8 @@ CTEST ?= ctest
 DRONE  := $(BIN_DIR)/drone_commander$(EXE)
 VSYNTH := $(BIN_DIR)/vsynth$(EXE)
 
-.PHONY: all configure build run run-drone run-vsynth test package clean distclean help
+.PHONY: all configure build build-all build-drone build-vsynth \
+        run run-drone run-vsynth test package clean distclean help
 
 all: build
 
@@ -40,16 +41,26 @@ configure: $(BUILD_DIR)/CMakeCache.txt
 build: configure
 	@$(CMAKE) --build $(BUILD_DIR) --parallel
 
+build-all: build
+
+# One app at a time, for a faster edit-run loop. Both live in the same CMake
+# project, so this is a target selection, not a second build tree.
+build-drone: configure
+	@$(CMAKE) --build $(BUILD_DIR) --target drone_commander --parallel
+
+build-vsynth: configure
+	@$(CMAKE) --build $(BUILD_DIR) --target vsynth --parallel
+
 # Every synth at once. Each owns its window; ctrl+c here stops both, and
 # closing one window leaves the other running.
 run: build
 	@echo "starting drone_commander and vsynth  (ctrl+c stops both)"
 	@$(DRONE) & $(VSYNTH) & wait
 
-run-drone: build
+run-drone: build-drone
 	@$(DRONE)
 
-run-vsynth: build
+run-vsynth: build-vsynth
 	@$(VSYNTH)
 
 test: build
@@ -66,8 +77,10 @@ distclean:
 
 help:
 	@echo "avsynth targets:"
-	@echo "  make              build every app"
+	@echo "  make              build every app (also: build, build-all)"
 	@echo "  make run          run every app"
+	@echo "  make build-drone  build Drone Commander only"
+	@echo "  make build-vsynth build vsynth only"
 	@echo "  make run-drone    run Drone Commander only"
 	@echo "  make run-vsynth   run vsynth only"
 	@echo "  make test         run every test through ctest"
