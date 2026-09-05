@@ -6,7 +6,7 @@ SQLite project file. PRD.md is the design doc, README.md has the build steps, ch
 map. Successor to `C:\dev\ffeedback\feedback.ps1` (PowerShell ffmpeg/ffplay one-liner rig; its
 CLAUDE.md holds the ffplay-era environment notes).
 
-**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Since 2026-09-04 the repository root is the only build entry point: run `make` from `C:\dev\avsynth`, never a `cmake` inside this folder (its CMakeLists refuses to configure standalone). The repo-wide plan is `../../ROADMAP.md`; phases 1 and 2 are done, so this app is C17 on SDL3/SDL3_ttf. Phases 3 and 4 move the parameter model, SQLite store and sheet UI into `shared/`.
+**This folder (`apps/video-synth/` in the `avsynth` monorepo, github.com/ojz/avsynth) is the project. Do not move or re-create it elsewhere.** Since 2026-09-04 the repository root is the only build entry point: run `make` from `C:\dev\avsynth`, never a `cmake` inside this folder (its CMakeLists refuses to configure standalone). The repo-wide plan is `../../ROADMAP.md`; phases 1 and 2 are done, so this app is C17 on SDL3/SDL3_ttf. P4 moves this app onto the shared fader, P5 onto the shared shell (`shared/app`) and the lab typeface, and P8 replaces `project.c` with `shared/store`.
 
 ## Build and run (Windows)
 

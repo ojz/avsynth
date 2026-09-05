@@ -1,11 +1,13 @@
 # avsynth
 
 A DIY synthesizer lab. Every instrument starts here as a small C program that
-tries out a topology, its ranges and a way of playing it. The ones worth
-keeping become hardware: machine-assembled SMT boards in small desktop boxes on
-USB-C 5 V power, with the analog rails each circuit needs generated on-board.
-The software is the sketchbook, not the firmware. [ROADMAP.md](ROADMAP.md) has
-the vision, the decisions and the plan.
+tries out a topology, its ranges and a way of playing it. An app is a unit that
+could plausibly be one box one day, and the ones worth keeping eventually
+become hardware — but that is parked, deliberately and for a long time, because
+the expensive part of an analog synth is knowing what the circuit has to do,
+and that is what playing these apps produces. The software is the sketchbook,
+not the firmware. [ROADMAP.md](ROADMAP.md) has the vision, the decisions and
+the plan.
 
 ## Applications
 
@@ -25,6 +27,20 @@ MIDI CC or a sequencer step can drive it without the app knowing which. That is
 the lab's shared control language, specified in [ROADMAP.md](ROADMAP.md)
 section 6 and implemented once in `shared/param` and `shared/ui`.
 
+## Where this is going
+
+The lab will run in **one process, hosted by a launcher** (ROADMAP D11). Each
+app stays its own program in its own folder with its own window — start it,
+kill it, run two of it — but they share an address space so signals can travel
+between them on named buses at audio rate as well as control rate. That is what
+makes a sequencer that is also a wavetable player possible, and it is why one
+app (MONITOR) will own the only connection to the speakers while every other
+app writes to a bus.
+
+None of that exists yet. The next steps are vsynth on the shared fader (P4),
+one shared app shell and one typeface (P5), then the launcher and the buses
+(P6). Phases are in ROADMAP section 8.
+
 ## Layout
 
 ```text
@@ -32,7 +48,9 @@ apps/drone-commander/   audio drone synth
 apps/video-synth/       video feedback synth
 shared/param/           the fader and parameter model, plain C, tested offline
 shared/ui/              the control surface on SDL3: how a fader looks and behaves
+launcher/               hosts the apps (planned, P6)
 tools/package.sh        release packaging: exe plus the DLLs it links
+assets/fonts/           the lab's typeface (planned, P5)
 assets/screenshots/     screenshots per application
 .github/workflows/      CI: build, test, artifacts, tagged releases
 ROADMAP.md              vision, decisions, phases

@@ -1,19 +1,26 @@
 # avsynth roadmap
 
-*v3, 2026-09-04. The decisions below are made. The phases are ordered, not
+*v4, 2026-09-05. The decisions below are made. The phases are ordered, not
 scheduled. Update this file when a decision changes or a phase lands.*
 
-*Changed since v2 (same day): hardware is parked, not cancelled, and the power
-question with it. Everything under `apps/` is now called an app. The fader is
-the lab's shared control (D8), signal conventions are fixed (D9), and the
-apps the lab is heading towards are written down in section 7 so they can be
-designed for without being built.*
+*Changed since v3: **the lab runs in one process, hosted by a launcher** (D11),
+which amends D7 — the OSC/UDP control plane is demoted from "how apps talk" to
+"how the lab talks to the outside". An app's state must live in a struct the
+app owns (D12). The lab has one deliberate visual identity, and the user
+directs it (D13). There is one shell, `shared/app` (D14). Phases are
+renumbered: the shell (P5) and the launcher (P6) come before new apps, and
+`shared/store` and `shared/link` move to P8 and P9.*
 
 ## 1. Vision
 
 avsynth is a lab of small **apps**. Each one is a C program that tries out a
 topology, a set of ranges and a way of playing it. They are meant to be played,
-not just run, and eventually to be played together.
+not just run, and to be played together.
+
+An app is a **unit that could plausibly be one box one day**. That constraint
+is doing real work even while hardware is parked: it is what stops an app from
+growing a tab bar and quietly becoming a suite. If it would need two front
+panels, it is two apps.
 
 The order of work is software first, by a long way. There is a great deal of
 experimentation to do before any of it is worth turning into a circuit, so
@@ -27,24 +34,26 @@ What every app has in common:
   gestures, one way of being addressed by a preset or by MIDI, in every app.
 - **Signals agree** (D9). Audio and modulation are bipolar, clocks are ramps,
   and connections between apps are named.
-- **Nothing is a plugin host.** Each app is its own executable, statically
-  reasoned about, started from `make run-<app>`.
+- **One shell** (D14). Window, event loop, gesture dispatch, text and palette
+  come from `shared/app`. An app supplies its parameters and its picture.
+- **State is owned** (D12). Everything an app knows lives in a struct it owns,
+  so the launcher can create it, destroy it, and run two of it.
 
 ## 2. What this repository is for
 
 - One directory per app under `apps/`, an independent program with its own
   README.
 - Shared infrastructure under `shared/`, so the second, third and tenth app
-  cost a fraction of the first: the fader and parameter model, preset storage,
-  the control surface, later MIDI and the inter-app link.
+  cost a fraction of the first: the fader and parameter model, the shell, the
+  in-process buses, preset storage, and later MIDI and the external link.
+- `launcher/`, the one program that is not an app: it hosts them.
 - One toolchain, one set of root commands, one CI that builds and packages
   every app.
 
-## 3. Where things stand (2026-09-04, after P1 and P2)
+## 3. Where things stand (2026-09-05, after P3)
 
-Two apps, one toolchain, one C standard, one windowing API. What is left to
-unify is the code: the parameter model, preset storage and the control surface
-are still per app, and the two apps' controls neither look nor behave alike.
+Two apps, one toolchain, one C standard, one windowing API, and one control
+concept implemented once. About 6,400 lines, of which `shared/` is 616.
 
 | | Drone Commander | vsynth |
 |---|---|---|
@@ -52,14 +61,25 @@ are still per app, and the two apps' controls neither look nor behave alike.
 | Standard | C17 | C17 |
 | Window / input | SDL3 from pkg-config | SDL3 + SDL3_ttf from pkg-config |
 | Other libraries | none | ffmpeg (avfilter, avformat, avcodec, avdevice, avutil), sqlite3 |
-| Parameters | a static table of 25 controls (`panel.c`) mirrored by `SynthParameters` | derived at runtime from the chain text (`rack.c`) |
+| Parameters | `shared/param`, a static table of definitions | derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
-| Controls | fixed 1180x760 panel, hand-placed 104 px sliders, absolute drag only | modal sheet, knob rows with a bar, keyboard nudge with fine and coarse |
+| Controls | `shared/param` + `shared/ui` faders on a grid | its own knob rows, drawn by `hud.c` |
+| Text | `SDL_RenderDebugText`, 8 px | a glyph atlas over a hunted system font |
 
-Drone Commander now meets D8: its controls are faders from `shared/param` and
-`shared/ui`, on a grid, with reset, three grains, units and full precision.
-vsynth still draws its own knob rows, so the two do not yet look alike. That is
-P4.
+What is honestly not done yet, and why it blocks cranking out apps:
+
+1. **`shared/ui` has exactly one consumer.** Drone Commander uses it, vsynth
+   does not. A shared library with one consumer is extracted, not shared: there
+   is no evidence yet that the fader survives an app whose parameters are
+   derived at runtime rather than declared. P4 is the test of the abstraction.
+2. **There is no shell.** A third app would copy `main.c`'s SDL boot and frame
+   loop, and copy `panel.c`'s event switch — which is the D8 gesture table
+   transcribed by hand. Transcribed twice, it stops being one table. P5.
+3. **Text is a placeholder in both apps, differently.** Neither choice is a
+   decision. The font is lab-wide and belongs in the shell (D13, P5).
+4. **Both apps keep mutable file-scope state.** `panel.c` holds `VALUES[]`,
+   `BOXES[]`, `FADERS[]` and `LAID_OUT`; `graph.c` holds `cap_on`; `rack.c`
+   holds `rng_state`. Small now, a week's work at ten apps (D12, P5).
 
 ## 4. Decisions
 
@@ -74,7 +94,7 @@ plus the DLLs it links, collected from the toolchain by the package step.
 **D2. SDL3 everywhere.** One windowing API means one shared control surface.
 
 **D3. Root make targets cover every app.** `make` builds everything, `make
-run` starts every app, `make build-<app>` and `make run-<app>` handle one.
+run` starts the launcher, `make build-<app>` and `make run-<app>` handle one.
 `make test` runs every test, `make package` produces the zips. The per-app
 targets select a CMake target inside the one project; they are not second
 build trees. Executables land in `build/bin/`.
@@ -82,11 +102,13 @@ build trees. Executables land in `build/bin/`.
 **D4. Shared code lives in `shared/`, and only code more than one app uses
 goes there.** The libraries, in the order they are extracted:
 
-1. `shared/param`: the fader and parameter model (D8). Plain C, no SDL.
-2. `shared/ui`: the control surface on SDL3, including how a fader is drawn
-   and driven.
-3. `shared/store`: presets and projects in SQLite.
-4. `shared/link`: the inter-app clock, buses and control plane (D7, D9).
+1. `shared/param`: the fader and parameter model (D8). Plain C, no SDL. *Done.*
+2. `shared/ui`: how a fader is drawn and driven, on SDL3. *Done, one consumer.*
+3. `shared/app`: the shell (D14). Window, frame loop, gesture dispatch, text,
+   palette, and the app ABI the launcher later loads.
+4. `shared/bus`: named in-process signal buses (D11, D9). Lock-free rings.
+5. `shared/store`: presets and projects in SQLite, including generative ones.
+6. `shared/link`: the external adapter — OSC/UDP to another machine, and MIDI.
 
 **D5. C17 for every app and shared library. No C++.** The root sets it once,
 with compiler extensions on because the apps use POSIX `strdup` and
@@ -95,15 +117,14 @@ with compiler extensions on because the apps use POSIX `strdup` and
 **D6. Everything under `apps/` is an app.** Not an instrument, not a synth,
 not a tool. Some make sound, some make pictures, some only route or measure.
 They are peers, they are addressed by name, and the vocabulary is uniform in
-code, docs and UI.
+code, docs and UI. `launcher/` is the one program that is not an app.
 
-**D7. Apps share a control plane, not a process or audio callback.** The native
-link protocol will use OSC-compatible UDP messages over localhost or LAN with
-stable paths and monotonic timestamps. It carries transport state, clock
-phase, resets and parameter changes. Each app receives packets on a network
-thread and forwards bounded events to its real-time engine; no socket call
-occurs on an audio callback. MIDI clock and control, PipeWire and JACK are
-adapters at the edge, never the internal protocol.
+**D7. Apps do not share an audio callback, and no app is a plugin host.**
+*Amended by D11: they do share a process.* What survives unchanged is the
+real-time discipline. Each app owns its own engine state. Only MONITOR opens a
+playback device (section 7); every other app writes to a named bus. No socket
+call, no allocation and no lock that can block ever occurs on an audio
+callback, whatever process the app is running in.
 
 **D8. The fader is the lab's control.** Every continuous parameter in every
 app is a fader, specified in section 6. It resets to a neutral, it shows its
@@ -120,17 +141,78 @@ control kinds; there are no bespoke widgets.
   modulation, inverted.
 - **Clocks are ramps, not pulses.** A clock carries a phase that runs 0 to 1
   and wraps. An app that wants an edge finds it by detecting the wrap; an app
-  that wants position uses the ramp directly. A missed packet costs precision,
+  that wants position uses the ramp directly. A missed sample costs precision,
   never a beat.
 - **Connections are named.** Signals between apps travel on named buses, not
   on device indices, so a patch is a set of names and can be reasoned about
   in text.
 
 **D10. Hardware is parked.** Nothing in the current plan depends on it, no app
-is designed around it, and no phase before it. Section 9 keeps what was
+is designed around it, and no phase touches it. Section 9 keeps what was
 already decided so it is not lost. The power topology is explicitly an open
 sore and is not to be designed until the software says what the circuit has to
 do.
+
+**D11. The lab runs in one process, hosted by a launcher.** This amends D7.
+
+*Why.* Section 7's SEQUENCER is meant to be one app that is a step sequencer
+at slow rates and a wavetable or sample player at audio rates — the same fader
+row, read faster. That is the strongest idea in the lab and **it cannot work
+over UDP**: an audio-rate signal between two apps needs shared memory, not
+packets. MONITOR summing every other app's output has the same requirement.
+The moment those two apps exist, an out-of-process design has to be undone.
+
+*Shape.*
+
+- Each app builds twice from the same sources: a **shared library** exporting a
+  small ABI (create, event, frame, audio, destroy), and a **thin executable
+  stub** that hosts exactly one instance. `make run-drone` keeps working and
+  still opens one window.
+- The launcher loads app libraries, runs **one SDL event loop**, and dispatches
+  by window ID. Every app keeps its own window, its own title bar and its own
+  everything. To the user they remain separate programs; the launcher is a
+  thing that starts them.
+- An app can be started, killed and **started more than once**. Two PINGs and
+  three SEQUENCERs is a normal patch, which named UDP addressing would have
+  needed a whole instance-naming scheme to express.
+- Signals travel on named in-process buses (`shared/bus`), lock-free rings, one
+  writer and many readers, carrying audio-rate and control-rate signals alike
+  under D9's conventions.
+- MONITOR owns the only playback device and sums the buses in its callback.
+
+*Costs, accepted knowingly.* One crash domain: a faulting app takes down the
+lab. Acceptable for a one-user lab of small programs, and the exe stub means
+any app can still be run alone to isolate it. And every app must obey D12.
+
+*What this does not change.* Apps stay in their own folders, keep their own
+READMEs, and are still reasoned about one at a time. Nothing becomes a plugin
+format, nothing gets a tab bar, and there is no host window that owns the
+apps' pixels.
+
+**D12. An app's state lives in a struct the app owns.** No mutable file-scope
+state — no `static` arrays, caches, layout flags or RNG seeds outside the
+instance. The launcher creates and destroys instances at will and may run two
+of the same app, which must share nothing. Constant tables (`static const`)
+are fine and encouraged.
+
+**D13. The lab has one visual identity, and the user directs it.** One
+typeface, shipped in `assets/fonts/` and loaded from there rather than hunted
+from system paths, at one set of sizes. One palette, in `shared/ui`. Apps do
+not each choose a look; an app's own picture (an oscilloscope, a video frame,
+a phase bar) is its own, but the chrome around it is the lab's.
+
+Generative and ornamental elements in the interface are wanted, not tolerated:
+they are part of what the lab is for. They come from a shared vocabulary in
+`shared/ui` so that ten apps look like one family. **The aesthetic direction is
+the user's to give and is not to be invented by an agent** — propose options,
+show them, and let the user choose.
+
+**D14. One shell: `shared/app`.** SDL init, window creation, the frame loop,
+the event pump, the D8 gesture dispatcher, the text callback and the palette
+live in exactly one place. An app supplies its parameter definitions, its
+layout, its picture and its engine. An app never writes its own event switch
+for faders, because a hand-transcribed gesture table is how the one gesture
+table stops being one.
 
 ## 5. Shared architecture
 
@@ -141,23 +223,45 @@ switches, enum steppers, and a set of them with a selection. The app supplies
 an apply callback: Drone Commander writes into `SynthParameters` and publishes
 it to the audio thread, vsynth sends an `avfilter_graph_send_command`.
 
-How the current code maps onto it:
-
-| Today | Becomes |
-|---|---|
-| `Control` rows in `panel.c` | fader and switch definitions, grouped by section |
-| `SynthParameters` | stays; it is the DSP engine's view, filled from the set |
-| `KnobDef` in `rack.c` | a fader, group = filter instance name, key = option name |
-| `ModuleDef.bypassable` / `enabled[]` | a switch per module |
-
 ### 5.2 `shared/ui`
 
-SDL3 only. Owns the sheet (frame, header, footer), modes and the rule that one
-mode owns the keyboard, the fader widget in both orientations, text through a
-glyph atlas, notices, and one palette. Each app keeps its own picture: the
-oscilloscope and meter in Drone Commander, the video and taps in vsynth.
+SDL3 only. Owns the fader widget in both orientations, the stepper, the panel
+frame, text through a `UiText` callback, notices, and one palette (D13). Each
+app keeps its own picture: the oscilloscope and meter in Drone Commander, the
+video and taps in vsynth.
 
-### 5.3 `shared/store`
+### 5.3 `shared/app`
+
+The shell (D14), and the seam the launcher needs. An app is a struct plus a
+table of functions:
+
+```c
+typedef struct AppSpec {
+    const char *name;                        /* "drone-commander" */
+    int   window_w, window_h;
+    void *(*create)(AppHost *host);          /* returns the instance */
+    void  (*destroy)(void *self);
+    bool  (*event)(void *self, const SDL_Event *ev);    /* app-level keys only */
+    void  (*frame)(void *self, SDL_Renderer *r);        /* the app's picture */
+    void  (*audio)(void *self, float *out, int frames); /* optional */
+    ParamSet *(*params)(void *self);         /* the shell drives these */
+} AppSpec;
+```
+
+The shell owns the gesture dispatch: it hit-tests the fader boxes, applies
+`ui_grain`, `ui_fader_value_at`, `paramset_nudge` and the reset gestures, and
+calls the app's apply callback. The app's `event` only sees what the shell did
+not consume. `AppHost` is how an app reaches its buses, its store and its
+window — supplied by the exe stub when run alone, by the launcher when hosted.
+
+### 5.4 `shared/bus`
+
+Named signal buses in one process (D11). A single-writer, many-reader ring per
+bus, published by name, carrying float samples under D9's conventions. Control
+rate and audio rate are the same mechanism at different block sizes; a clock is
+a bus carrying a phase ramp. No locks on the reader or the writer path.
+
+### 5.5 `shared/store`
 
 SQLite. vsynth's schema generalized so a preset is keyed by `(group, key)`,
 which is the fader's address, and an app is any app:
@@ -169,19 +273,30 @@ patch        id, app, position, name, definition -- chain text, or a topology na
 preset       id, patch_id, slot 1..10, name
 preset_value preset_id, grp, key, value
 preset_flag  preset_id, grp, key, on
+generator    preset_id, kind, seed, constraint   -- section 7.1
 ```
 
-### 5.4 Boundaries that do not move
+### 5.6 `shared/link`
 
-- A DSP engine depends on nothing in `shared/` except parameter definitions,
-  and never on SDL, SQLite or ffmpeg.
-- The audio callback rules in `AGENTS.md` apply unchanged.
-- `shared/ui` never talks to `shared/store`; the app wires them.
+Demoted by D11 from the internal protocol to the **external adapter**: an
+OSC-compatible UDP surface so a second machine, a phone or another program can
+drive fader addresses and follow the clock, plus MIDI clock and CC. Messages
+carry monotonic timestamps and stable addresses. Socket I/O runs on its own
+thread and publishes bounded events; it never touches an audio callback.
+
+### 5.7 Boundaries that do not move
+
+- A DSP engine depends on nothing except `shared/param` definitions, and never
+  on SDL, SQLite, ffmpeg or `shared/ui`.
+- The audio callback rules in `AGENTS.md` apply unchanged, in-process or not.
+- `shared/ui` never talks to `shared/store`; the shell wires them.
+- The launcher never draws inside an app's window.
 
 ## 6. The fader
 
-One control, shared by every app. This section is the specification; `shared/param`
-and `shared/ui` implement it and nothing else defines a continuous control.
+One control, shared by every app. This section is the specification;
+`shared/param` and `shared/ui` implement it and nothing else defines a
+continuous control.
 
 **Identity.** A fader is addressed by `group` and `key`, both stable strings.
 That address is what a preset row, a MIDI binding and a sequencer target all
@@ -229,14 +344,14 @@ whether a human, a CC or a step moved it.
 
 ## 7. Apps the lab is heading towards
 
-Direction, not a work queue. Written down because the shared pieces have to be
-designed with these in mind, and because an earlier SuperCollider version of
-this lab was lost. None of them is scheduled.
+Direction, not a work queue, except where a phase names one. Written down
+because the shared pieces have to be designed with these in mind, and because
+an earlier SuperCollider version of this lab was lost.
 
 - **MONITOR.** The only app that talks to the speakers. A level fader, a
   visualizer, and recording to file. Everything else outputs to a named bus
   and is silent until MONITOR is running. This is what makes named buses
-  (D9) worth having and keeps output level in exactly one place.
+  (D9, D11) worth having and keeps output level in exactly one place.
 - **CLOCK.** A master BPM with derived faster and slower ramps, each a named
   bus carrying phase 0 to 1 per D9. Tempo can be nudged while running so it
   can be synced up by ear against something already playing. No pulses.
@@ -245,8 +360,8 @@ this lab was lost. None of them is scheduled.
   doubled or halved. Takes a clock ramp in and outputs the fader under the
   playhead. Because the output is just a signal, the same app is a step
   sequencer for a cutoff at slow rates and a wavetable or sample player at
-  audio rates. This is the strongest argument for the fader being one shared,
-  addressable, MIDI-mappable thing rather than per-app widgets.
+  audio rates. This is the strongest argument both for the fader being one
+  shared addressable thing (D8) and for the lab being one process (D11).
 - **A filter app** in the spirit of the parts of a Sherman Filterbank that
   actually got used: gain into a high-pass into a low-pass. No amplitude
   envelope, no cutoff envelope.
@@ -279,19 +394,18 @@ every roll of the dice was in tune with itself; another was free.
 That is a different thing from randomising a knob, and it generalises: a fader
 already carries range, taper, neutral and a stable address, which is most of
 what a constrained generator needs. vsynth's `x` and `X` randomize are the
-crude seed of it. Recording it as direction because `shared/store` (P5) should
-be able to hold a generator alongside stored values rather than being retrofitted
-for it later, and because it is the answer to "presets are boring".
+crude seed of it. `shared/store` (P8) holds a generator alongside stored values
+rather than being retrofitted for it later, because this is the answer to
+"presets are boring".
 
 ### 7.2 What this tells the software
 
-These are not a work queue; they describe the kind of sound and the kind of
-experimentation the lab is for. Read together they say: drones and resonance
-rather than beats and songs; slow signals that modulate other signals; physical
-and visual inputs treated as control voltage; constrained randomness preferred
-over recall; and every parameter reachable while the thing is running. Drone
-Commander and vsynth already represent that fairly well, which is why they are
-the two that exist.
+These describe the kind of sound and the kind of experimentation the lab is
+for. Read together they say: drones and resonance rather than beats and songs;
+slow signals that modulate other signals; physical and visual inputs treated as
+control voltage; constrained randomness preferred over recall; and every
+parameter reachable while the thing is running. Drone Commander and vsynth
+already represent that fairly well, which is why they are the two that exist.
 
 Why not SuperCollider, where much of this existed before: deployment is a
 single static executable here, the result is stable, and writing the DSP
@@ -347,36 +461,80 @@ A later pass made the hit-testing pixel-density independent.
   held one control apiece in a mostly empty box, and a 104 px track spanning
   20 Hz to 12 kHz put 115 Hz in a pixel with no reset and no fine grain.
 
-**P4. vsynth on the shared fader.** `rack.c` produces faders instead of
-`KnobDef`s and `hud.c` draws them with `shared/ui`, so both apps' controls
-look and behave identically. Exit: the two apps side by side are recognisably
-the same instrument family, and `--selftest` still passes.
+**P4. vsynth on the shared fader.** `rack.c` produces `Param`s instead of
+`KnobDef`s and `hud.c` draws them with `shared/ui`, so both apps' controls look
+and behave identically. This is the test of the abstraction: vsynth's
+parameters are discovered at runtime from the chain text, so if the fader model
+only fits a declared table, it fails here rather than in app number five.
+*Exit:* the two apps side by side are recognisably the same instrument family,
+and `--selftest` still passes.
 
-**P5. `shared/store`.** vsynth's `project.c` becomes `shared/store` with the
+**P5. `shared/app`: the shell, the identity, and owned state.** The phase that
+makes a new app cheap.
+- Extract the SDL boot, the frame loop, the event pump and the D8 gesture
+  dispatcher out of `panel.c` and `hud.c` into one shell (D14), behind the
+  `AppSpec` of section 5.3. Both existing apps move onto it.
+- One typeface, chosen by the user, shipped in `assets/fonts/`, loaded from
+  there by both apps; the system-font hunt in `hud.c` goes away. One palette.
+  A first pass at the lab's visual identity, presented as options (D13).
+- Kill mutable file-scope state in both apps (D12): `VALUES[]`, `BOXES[]`,
+  `FADERS[]`, `LAID_OUT`, `cap_on`, `rng_state`.
+- *Exit:* a new app reaches a first window with working faders in roughly 200
+  lines of its own code, and neither existing app writes an event switch for a
+  fader.
+
+**P6. The launcher and `shared/bus`.** D11 made real.
+- Each app builds as a library plus a thin exe stub; `make run-<app>` is
+  unchanged from the user's side.
+- `launcher/`: loads app libraries, one SDL event loop dispatching by window
+  ID, start and kill, and more than one instance of an app.
+- `shared/bus`: named lock-free rings, audio rate and control rate.
+- MONITOR is written here as the proof, because it is the app that needs it:
+  it owns the only playback device. Drone Commander stops opening one and
+  writes to a named bus instead.
+- *Exit:* Drone Commander and MONITOR in the launcher, sound coming out of
+  MONITOR, either killable without touching the other, and two Drone Commanders
+  at once making two independent drones.
+
+**P7. The first apps cranked out.** CLOCK, SEQUENCER, and the Sherman-style
+filter, in that order — CLOCK because it defines what a clock bus carries,
+SEQUENCER because it is the app the whole design was bent around, the filter
+because it is the first one whose value is purely in how it sounds. Each is
+built on the finished shell and judged by playing it, not by a test.
+*Exit:* a patch worth recording, made of at least four apps.
+
+**P8. `shared/store`.** vsynth's `project.c` becomes `shared/store` with the
 generalized schema keyed on the fader address, plus a migration for existing
-project files. Drone Commander gains a project file and ten preset slots on
-the digit row by scancode. Exit: both apps save and load presets through the
-same code.
+project files. Every app gains a project file and ten preset slots on the digit
+row. Generative presets (7.1) land here, not later: a preset slot may hold a
+generator instead of values. *Exit:* every app saves and recalls through the
+same code, and at least one app has a constrained generator worth rolling.
 
-**P6. `shared/link`, the clock and buses.** Define the OSC-compatible message
-schema and the monotonic timestamp model, then a UDP control thread and
-bounded event queue. Clocks are ramps per D9. First acceptance test: two apps
-share transport and resets without phase depending on packet arrival jitter.
+**P9. `shared/link`, the outside world.** OSC-compatible UDP for a second
+machine, MIDI clock in, and MIDI learn onto fader addresses. Followers run
+their own clocks and correct phase from timestamped updates. *Exit:* a MIDI
+controller moves a fader in any app without that app knowing about MIDI.
 
-**Later, in no order.** MIDI learn onto fader addresses; the apps in section 7;
-host-side modulators for vsynth; a control surface in a second window; an Arch
-build check.
+**Later, in no order.** The remaining apps in section 7; host-side modulators
+for vsynth; a control surface in a second window; an Arch build check;
+recording to file in MONITOR.
 
 ## 9. Parked: hardware
 
-Kept so it is not lost. Nothing depends on it and no phase before P6 touches
-it. Revisit only when the software has settled what a circuit would have to do.
+Kept so it is not lost. Nothing depends on it and no phase touches it. Revisit
+only when the software has settled what a circuit would have to do.
 
 The intent was: boards made for assembly rather than soldering, sent to a PCBA
 service with every SMT part machine-placed and hand soldering reserved for
 panel parts; small desktop boxes rather than a rack standard; and the analog
 versions staying fully analog, with the software as the sketchbook that settles
 topology, ranges and feel but never becoming firmware.
+
+The order stays software first for a reason worth restating: the expensive part
+of an analog synth is not the layout, it is knowing what the circuit has to do
+and what its ranges should be. That is exactly what playing the apps produces.
+Which app gets converted first is a decision to make *after* there are several
+to choose between, and it will be made by ear.
 
 **Power is unresolved and disliked.** A USB-C 5 V input with analog rails made
 on board was the last idea, and it is not settled. Do not design it, do not
@@ -386,11 +544,16 @@ propose a topology, and do not let an app's design depend on it.
 
 To settle before the phase that needs them:
 
-1. Whether Drone Commander keeps a spatially arranged panel after P3 or moves
-   to vsynth's row-based sheet. P3 assumes it keeps a panel, because the
-   oscilloscope and the section grouping carry meaning that rows would lose.
-2. Whether per-app project files merge into one lab-wide file. Not needed
-   before P5 ships one schema.
-3. What the sequencer's buffer window means at audio rate: sample count per
+1. Which typeface, and how much generative ornament the interface carries. The
+   user directs this (D13); P5 is when it is asked.
+2. Whether the launcher shows a list of apps, a patch view of the buses, or
+   nothing but a menu. Not needed before P6; the answer probably arrives from
+   playing.
+3. Whether per-app project files merge into one lab-wide file. Not needed
+   before P8 ships one schema.
+4. What the sequencer's buffer window means at audio rate: sample count per
    fader, interpolation between faders, and where a buffer comes from.
-   Needed before section 7's SEQUENCER, not before.
+   Needed before P7's SEQUENCER.
+5. Whether Drone Commander keeps a spatially arranged panel or moves to a
+   row-based sheet. P3 assumed it keeps a panel, because the oscilloscope and
+   the section grouping carry meaning that rows would lose. Still assumed.
