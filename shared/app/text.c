@@ -88,6 +88,16 @@ static int build_atlas(AppText *t, float px)
         /* SDL3_ttf renders the glyph into its full advance cell, bearing
          * included, so the surface goes at the cell's left as it is. */
         SDL_Rect dst = t->glyphs[c - FIRST_GLYPH].src;
+        /* The one liberty taken with the face: B612 Mono sets its full stop,
+         * comma, colon and semicolon at the far left of the cell, which reads
+         * as a gap after every decimal point ("110. 0 Hz"). Centre those four
+         * in their cell, because the readouts are what this lab stares at.
+         * Any face whose punctuation is already centred is left alone. */
+        if (c == '.' || c == ',' || c == ':' || c == ';') {
+            int minx, maxx, miny, maxy, adv;
+            if (TTF_GetGlyphMetrics(t->font, (Uint32)c, &minx, &maxx, &miny, &maxy, &adv) && maxx > minx)
+                dst.x += (adv - (maxx - minx)) / 2 - minx;
+        }
         SDL_SetSurfaceBlendMode(gs, SDL_BLENDMODE_NONE);
         SDL_BlitSurface(gs, NULL, atlas, &dst);
         SDL_DestroySurface(gs);

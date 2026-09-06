@@ -43,9 +43,9 @@ The launcher and the buses do not exist yet; they are P6. What does exist: both
 apps run on one shared control (P4) and on one shell, `shared/app`, which owns
 the window, the frame loop, the typeface and every fader gesture, so an app is
 a struct plus a table of functions and its executable is a one-line stub
-(P5). The remaining P5 item is the typeface itself: until one is chosen and
-shipped in `assets/fonts/`, the shell uses a system monospace face and says so
-on stderr. Phases are in ROADMAP section 8.
+(P5). The lab's typeface is **B612 Mono**, drawn for aircraft cockpit displays
+and shipped in `assets/fonts/` under the Open Font Licence; the shell renders
+it for every app. Phases are in ROADMAP section 8.
 
 Every app takes `--screenshot FILE.bmp` (the window, two seconds after start)
 and saves `F12` screenshots to its data folder or to `--shots DIR`. Both come
@@ -63,7 +63,7 @@ shared/app/             the app shell: SDL boot, window, frame loop, typeface, g
 shared/bus/             named in-process signal buses, audio and control rate (planned, P6)
 launcher/               hosts the apps in one process (planned, P6)
 tools/package.sh        release packaging: exe, the DLLs it links, the fonts
-assets/fonts/           the lab's typeface; drop one .ttf here and the shell uses it (to be chosen, P5)
+assets/fonts/           the lab's typeface, B612 Mono, with its licence; the shell loads it from here
 assets/screenshots/     screenshots; Drone Commander so far
 .github/workflows/      CI: build, test, artifacts, tagged releases
 CMakeLists.txt          the one CMake project; CMakePresets.json for editors

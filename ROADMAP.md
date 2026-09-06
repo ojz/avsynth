@@ -76,10 +76,9 @@ What is honestly not done yet, and why it blocks cranking out apps:
    window, the frame loop, the event pump and the one gesture table. Neither
    app has an event switch for a fader any more; each is a struct plus an
    `AppSpec`, and its executable is a one-line stub.
-3. **Text is a placeholder.** Half resolved: the shell renders one typeface
-   through one atlas for both apps, from `assets/fonts/` when a face is there.
-   No face is there yet, so a system monospace stands in. Choosing it is the
-   user's (D13); it is the open half of P5.
+3. ~~**Text is a placeholder.**~~ Resolved by P5: one typeface, B612 Mono,
+   chosen by the user and shipped in `assets/fonts/`, rendered through one
+   atlas in the shell for both apps.
 4. ~~**Both apps keep mutable file-scope state.**~~ Resolved by P5: the panel's
    arrays live in `PanelState`, vsynth's `App` is allocated by `create()`, the
    rack's scratch is on the heap. Two documented exceptions remain in vsynth,
@@ -508,9 +507,16 @@ discovered at runtime from the chain text. What the test found:
 - Also done here because the file was open: `rack.c`'s `rng_state` moved
   into the `Rack` (D12), and vsynth's palette took the shared theme's values.
 
-**P5. `shared/app`: the shell, the identity, and owned state.** The phase that
-makes a new app cheap. **Shell and owned state done 2026-09-06; the typeface
-and the identity are open, waiting on the user (D13).**
+**P5. `shared/app`: the shell, the identity, and owned state. Done 2026-09-06.**
+The phase that makes a new app cheap. The user chose the typeface the same
+day: **B612 Mono**, the face Airbus had drawn for cockpit displays, shipped as
+`assets/fonts/B612Mono-Regular.ttf` under the Open Font Licence. The palette
+stays graphite and amber for now, and generative ornament is parked until the
+apps have been played more; both were offered as options and the user chose
+to leave them. One liberty is taken with the face, in the shell's atlas: its
+full stop, comma, colon and semicolon sit at the far left of their cell by
+design, which reads as a gap after every decimal point, so those four glyphs
+are centred.
 - ~~Extract the SDL boot, the frame loop, the event pump and the D8 gesture
   dispatcher out of `panel.c` and `hud.c` into one shell (D14), behind the
   `AppSpec` of section 5.3. Both existing apps move onto it.~~ Done. Each app
@@ -518,13 +524,12 @@ and the identity are open, waiting on the user (D13).**
   Drone Commander's spec is about 200 lines; vsynth's is its old `main.c`
   reorganised into create, event, tick and frame, the same length with the
   window, screenshot and fader-key code gone and the shell plumbing added.
-- One typeface, chosen by the user, shipped in `assets/fonts/`. The mechanism
-  is done: the shell loads the first `.ttf` or `.otf` it finds there (or in
-  `fonts/` next to a packaged exe), renders one atlas, and hands the same
-  `UiText` to `shared/ui` and to both apps; the package step ships the folder.
-  The file is not: a system monospace stands in and the log says so. One
-  palette is in `shared/ui` and both apps use its values. A first pass at the
-  lab's visual identity, presented as options (D13), is the remaining work.
+- ~~One typeface, chosen by the user, shipped in `assets/fonts/`.~~ Done. The
+  shell loads the first `.ttf` or `.otf` it finds there (or in `fonts/` next
+  to a packaged exe), renders one atlas, and hands the same `UiText` to
+  `shared/ui` and to both apps; the package step ships the folder. Without a
+  file a system monospace stands in and the log says so. One palette is in
+  `shared/ui` and both apps use its values. Ornament: parked by the user.
 - ~~Kill mutable file-scope state in both apps (D12).~~ Done, with two
   documented exceptions that are library-global by nature (`graph.c`'s log
   capture, `voice.c`'s device registration).
@@ -594,8 +599,11 @@ propose a topology, and do not let an app's design depend on it.
 
 To settle before the phase that needs them:
 
-1. Which typeface, and how much generative ornament the interface carries. The
-   user directs this (D13); P5 is when it is asked.
+1. ~~Which typeface~~ (B612 Mono, decided 2026-09-06), and how much generative
+   ornament the interface carries. Ornament was offered as options (grain,
+   generated rules, an instance signature, living faders, a reactive ground)
+   and the user parked it until the apps have been played more. Ask again
+   once P7 has produced a patch worth recording.
 2. Whether the launcher shows a list of apps, a patch view of the buses, or
    nothing but a menu. Not needed before P6; the answer probably arrives from
    playing.

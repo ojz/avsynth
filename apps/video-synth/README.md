@@ -47,10 +47,9 @@ and delete, then resets the capture region to 640x480 and keeps running.
 `--screenshot FILE.bmp` saves the window two seconds after start and keeps
 running; `--shots DIR` is where `F12` screenshots go.
 
-The panel text uses a system monospace font: Consolas, Lucida Console or
-Courier New on Windows; DejaVu Sans Mono, Liberation Mono or Noto Sans Mono on
-Linux. Without one the panel still shows bars. One typeface shipped with the
-lab replaces this hunt in ROADMAP P5.
+The panel text is the lab's typeface, B612 Mono, loaded by the shell from
+`assets/fonts/` (or `fonts/` next to a packaged exe). If that folder is empty
+the shell falls back to a system monospace font and says so on stderr.
 
 The window is borderless and opens in knobs mode. Put it inside the capture
 region for feedback.

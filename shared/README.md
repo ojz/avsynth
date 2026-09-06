@@ -8,7 +8,7 @@ order they are extracted:
 |---|---|---|
 | `param` | the fader and parameter model: identity, range, neutral, taper, the three step grains, readout precision, and a set with a selection | in use by both apps |
 | `ui` | the control surface on SDL3: how a fader is laid out and drawn, as a cell or as a row, the switch and enum stepper, the framed panel, the lab's one palette | in use by both apps |
-| `app` | the shell: SDL boot, the window, the frame loop, the event pump, the gesture dispatcher, the typeface and screenshots, behind an `AppSpec` every app fills in (D14) | in use by both apps; the typeface itself is still to be chosen (D13) |
+| `app` | the shell: SDL boot, the window, the frame loop, the event pump, the gesture dispatcher, the typeface and screenshots, behind an `AppSpec` every app fills in (D14) | in use by both apps, rendering B612 Mono from `assets/fonts/` |
 | `bus` | named lock-free in-process buses at audio rate and control rate, how apps send signals to each other inside the launcher (D11) | ROADMAP P6 |
 | `store` | presets and projects in SQLite, keyed on the fader address, including generative presets | ROADMAP P8, starting from vsynth's `project.c` |
 | `link` | the adapter to the outside world: OSC-compatible UDP for a second machine, MIDI clock and MIDI learn | ROADMAP P9 |
