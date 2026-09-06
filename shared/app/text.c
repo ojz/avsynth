@@ -85,6 +85,8 @@ static int build_atlas(AppText *t, float px)
     for (int c = FIRST_GLYPH; c <= LAST_GLYPH; c++) {
         SDL_Surface *gs = TTF_RenderGlyph_Blended(t->font, (Uint32)c, white);
         if (!gs) continue;
+        /* SDL3_ttf renders the glyph into its full advance cell, bearing
+         * included, so the surface goes at the cell's left as it is. */
         SDL_Rect dst = t->glyphs[c - FIRST_GLYPH].src;
         SDL_SetSurfaceBlendMode(gs, SDL_BLENDMODE_NONE);
         SDL_BlitSurface(gs, NULL, atlas, &dst);
