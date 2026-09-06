@@ -52,9 +52,11 @@ What every app has in common:
 
 ## 3. Where things stand (2026-09-06, after P4)
 
-Two apps, one toolchain, one C standard, one windowing API, and one control
-concept implemented once and used twice. About 6,700 lines, of which `shared/`
-is 678.
+Three apps, one toolchain, one C standard, one windowing API, one shell, and
+one control concept implemented once and used three times. The third app,
+Drone V2, is 260 lines and is not in the table below because it has nothing
+the table asks about: five triangle voices, ten faders, its own audio device
+until P6.
 
 | | Drone Commander | vsynth |
 |---|---|---|
@@ -406,6 +408,10 @@ an earlier SuperCollider version of this lab was lost.
   micro-fragments, and reconstruct the input out of the record's pieces.
   Concatenative resynthesis. The one idea here that never got built before.
 - **A kick drum app.** Crude on purpose.
+- **Drone V2.** Built 2026-09-06, the day after this list was written: five
+  triangle voices, a frequency and a level each, summed, nothing else. The
+  user asked for it as soon as the shell existed, which says something about
+  what the lab is for: the simplest possible drone, played by ear.
 
 ### 7.1 Generative presets
 
@@ -535,8 +541,11 @@ are centred.
   capture, `voice.c`'s device registration).
 - *Exit:* a new app reaches a first window with working faders in roughly 200
   lines of its own code, and neither existing app writes an event switch for a
-  fader. The second half holds today; the first is to be proven by MONITOR in
-  P6.
+  fader. Both hold: **Drone V2** (`apps/drone-v2`), five triangle voices with
+  a frequency and a level each and nothing else, asked for by the user the
+  day the shell landed, is one file of 260 lines including its audio thread,
+  its mute banner and its panel, and was written and playing in under an
+  hour.
 
 **P6. The launcher and `shared/bus`.** D11 made real.
 - Each app builds as a library plus a thin exe stub; `make run-<app>` is

@@ -52,4 +52,5 @@ enable_testing()
 
 add_subdirectory(shared)
 add_subdirectory(apps/drone-commander)
+add_subdirectory(apps/drone-v2)
 add_subdirectory(apps/video-synth)

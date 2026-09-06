@@ -14,9 +14,10 @@ the plan.
 | Application | What it is | Docs |
 |---|---|---|
 | **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with pulse width, FM cascade, state-variable filter, VCA and three square LFOs, the second and third able to hard-sync to the one before. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
+| **Drone V2** (`apps/drone-v2`) | Five triangle voices, each a frequency and a level, summed. Nothing else. The first app written on the finished shell, about two hundred lines. | [README](apps/drone-v2/README.md) |
 | **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Controls are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
 
-Both are C17 on SDL3, built by one CMake project against system libraries from
+All are C17 on SDL3, built by one CMake project against system libraries from
 pkg-config. Nothing is vendored or downloaded at configure time, so both
 machines and CI resolve the same libraries from the same packages.
 
@@ -55,6 +56,7 @@ from the shell.
 
 ```text
 apps/drone-commander/   audio drone synth
+apps/drone-v2/          five triangle voices, the 200-line app
 apps/video-synth/       video feedback synth; PRD.md there is its design
 shared/                 code used by more than one app; its README lists the libraries
 shared/param/           the fader and parameter model, plain C, tested offline
@@ -96,8 +98,10 @@ make              # build every app (also: build, build-all)
 make run          # run every app
 make build-drone  # build Drone Commander only
 make build-vsynth # build vsynth only
+make build-drone2 # build Drone V2 only
 make run-drone    # run Drone Commander only
 make run-vsynth   # run vsynth only
+make run-drone2   # run Drone V2 only
 make test         # every test, through ctest
 make package      # zip each app with its DLLs into dist/
 make help         # the full list
@@ -117,9 +121,9 @@ has the chain syntax and the key map.
 
 ## CI and releases
 
-Every push and pull request builds and tests both apps on Windows in the same
+Every push and pull request builds and tests every app on Windows in the same
 MSYS2 UCRT64 environment a developer uses, then publishes
-`drone-commander-windows` and `vsynth-windows` artifacts. Tags matching `v*`
+`drone-commander-windows`, `drone-v2-windows` and `vsynth-windows` artifacts. Tags matching `v*`
 create a GitHub release with the same zips. Each zip carries the executable,
 its README and the DLLs it links, so it runs on a machine with no toolchain
 installed. Both apps come out of one job on purpose: they share the toolchain

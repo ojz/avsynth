@@ -27,6 +27,7 @@ CTEST ?= ctest
 
 DRONE  := $(BIN_DIR)/drone_commander$(EXE)
 VSYNTH := $(BIN_DIR)/vsynth$(EXE)
+DRONE2 := $(BIN_DIR)/drone_v2$(EXE)
 
 .PHONY: all configure build build-all build-drone build-vsynth \
         run run-drone run-vsynth test package clean distclean help
@@ -51,17 +52,23 @@ build-drone: configure
 build-vsynth: configure
 	@$(CMAKE) --build $(BUILD_DIR) --target vsynth --parallel
 
-# Every synth at once. Each owns its window; ctrl+c here stops both, and
-# closing one window leaves the other running.
+build-drone2: configure
+	@$(CMAKE) --build $(BUILD_DIR) --target drone_v2 --parallel
+
+# Every app at once. Each owns its window; ctrl+c here stops them all, and
+# closing one window leaves the others running.
 run: build
-	@echo "starting drone_commander and vsynth  (ctrl+c stops both)"
-	@$(DRONE) & $(VSYNTH) & wait
+	@echo "starting drone_commander, drone_v2 and vsynth  (ctrl+c stops all)"
+	@$(DRONE) & $(DRONE2) & $(VSYNTH) & wait
 
 run-drone: build-drone
 	@$(DRONE)
 
 run-vsynth: build-vsynth
 	@$(VSYNTH)
+
+run-drone2: build-drone2
+	@$(DRONE2)
 
 test: build
 	@$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
@@ -83,6 +90,8 @@ help:
 	@echo "  make build-vsynth build vsynth only"
 	@echo "  make run-drone    run Drone Commander only"
 	@echo "  make run-vsynth   run vsynth only"
+	@echo "  make build-drone2 build Drone V2 only"
+	@echo "  make run-drone2   run Drone V2 only"
 	@echo "  make test         run every test through ctest"
 	@echo "  make package      zip each app with its DLLs into $(DIST_DIR)/"
 	@echo "  make clean        remove build products, keep the configuration"

@@ -23,7 +23,7 @@ DIST=${2:-dist}
 # are found however the script was invoked, not only from the repository root.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-APPS="drone_commander vsynth"
+APPS="drone_commander drone_v2 vsynth"
 
 # Where the toolchain keeps its DLLs. A name the import table asks for that
 # exists here is ours to ship; anything else belongs to Windows.
@@ -33,6 +33,7 @@ LIBDIR=$(dirname "$(command -v cc 2>/dev/null || command -v gcc)")
 readme_for() {
     case $1 in
     drone_commander) echo "$ROOT/apps/drone-commander/README.md" ;;
+    drone_v2)        echo "$ROOT/apps/drone-v2/README.md" ;;
     vsynth)          echo "$ROOT/apps/video-synth/README.md" ;;
     *)               echo "" ;;
     esac
