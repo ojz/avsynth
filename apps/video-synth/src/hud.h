@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <SDL3/SDL.h>
+#include "app.h"
 #include "rack.h"
 #include "voice.h"
 
@@ -13,22 +14,27 @@
  *     with a header (F-key tabs, active mode highlighted, chain / preset / fps
  *     on the right) and a footer hint line. Each mode draws its body inside
  *     the rect hud_sheet() returns;
- *   - the knobs panel body (mode MODE_PANEL): one row per control with a bar;
+ *   - the knobs panel body (mode MODE_PANEL): one shared fader per control,
+ *     laid out as rows and handed to the shell as a UiSurface, which drives
+ *     them (drag, wheel, reset, keys);
  *   - tap thumbnails along the bottom edge, in any mode that shows the picture;
  *   - transient notices, shown even on the bare picture;
- *   - the glyph atlas (SDL3_ttf, system monospace font) via hud_text().
+ *   - text, through the shell's typeface, via hud_text().
  *
- * Panel mouse: click a row to select it, drag on its bar to set the value,
- * click the module name to bypass the module, wheel to nudge. Only the left
- * button is consumed, so right-drag resizes the window even over the panel.
+ * Panel mouse that is vsynth's own: click the module name to bypass the
+ * module. Only the left button is consumed, so right-drag resizes the window
+ * even over the panel.
  */
 
 enum Mode { MODE_MAIN, MODE_PANEL, MODE_EDIT, MODE_HELP, MODE_PROJECT, MODE_COUNT };
 
 typedef struct Hud Hud;
 
-Hud  *hud_create(SDL_Renderer *ren, const Rack *rack);
+Hud  *hud_create(const AppHost *host, const Rack *rack);
 void  hud_destroy(Hud *h);
+
+/* The faders on screen right now, for the shell; NULL when the panel is not up. */
+const UiSurface *hud_surface(const Hud *h);
 
 void  hud_set_mode(Hud *h, enum Mode m);
 enum Mode hud_mode(const Hud *h);
@@ -52,10 +58,10 @@ void  hud_draw(Hud *h, SDL_Renderer *ren, int w, int h_);
 SDL_Rect hud_sheet(Hud *h, SDL_Renderer *ren, int W, int H);
 void     hud_footer(Hud *h, const SDL_Rect *body, const char *left, const char *right);
 
-/* Panel mouse. Returns 1 if the event was consumed. */
+/* Panel mouse the shell did not take. Returns 1 if the event was consumed. */
 int   hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice);
 
-/* Text drawing with the shared glyph atlas. */
+/* Text drawing with the lab's typeface. */
 void  hud_text(Hud *h, int x, int y, SDL_Color col, const char *s);
 int   hud_text_width(const Hud *h, const char *s);
 int   hud_line_h(const Hud *h);

@@ -195,6 +195,18 @@ void paramset_nudge(ParamSet *s, int i, int steps, ParamGrain g)
     s->values[i] = param_nudge(&s->defs[i], s->values[i], steps, g);
 }
 
+void paramset_step(ParamSet *s, int i, int dir)
+{
+    if (i < 0 || i >= s->n) return;
+    const Param *p = &s->defs[i];
+    if (p->kind == PARAM_FADER) { paramset_nudge(s, i, dir, PARAM_FINE); return; }
+    int n = (int)floor(p->max - p->min + 0.5) + 1;
+    if (n < 1) n = 1;
+    int at = (int)floor(s->values[i] - p->min + 0.5);
+    at = ((at + dir) % n + n) % n;
+    s->values[i] = p->min + at;
+}
+
 void paramset_reset(ParamSet *s, int i)
 {
     if (i < 0 || i >= s->n) return;

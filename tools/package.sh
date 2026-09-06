@@ -88,6 +88,13 @@ for app in $APPS; do
         cp -f "$readme" "$out/"
     fi
 
+    # The lab's typeface (ROADMAP D13). The shell looks in fonts/ next to the
+    # executable first, so a packaged app carries it.
+    if [ -d "$ROOT/assets/fonts" ] && ls "$ROOT/assets/fonts"/*.[ot]tf >/dev/null 2>&1; then
+        mkdir -p "$out/fonts"
+        cp -f "$ROOT/assets/fonts"/*.[ot]tf "$out/fonts/"
+    fi
+
     case $exe in
     *.exe) bundle_libs "$exe" "$out"; zip=$app-windows.zip ;;
     *)     zip=$app-linux.zip ;;

@@ -4,13 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <SDL3_ttf/SDL_ttf.h>
 
 #include "ui.h"
 
-#define FIRST_GLYPH 32
-#define LAST_GLYPH  126
-#define NGLYPH (LAST_GLYPH - FIRST_GLYPH + 1)
 #define NOTICE_MS 2500
 #define SHEET_MAX_W 820
 #define PAD 6
@@ -23,7 +19,6 @@ const SDL_Color HUD_SEL  = { 232, 168,  56, 255 };
 const SDL_Color HUD_OK   = { 108, 200, 138, 255 };
 const SDL_Color HUD_ERR  = { 214,  92,  78, 255 };
 
-typedef struct Glyph { SDL_Rect src; int advance; } Glyph;
 
 /* One control on the panel: the module name column the HUD draws itself,
  * then a shared fader (or a switch) laid out as a row over the rest. */
@@ -36,13 +31,10 @@ typedef struct Row {
 } Row;
 
 struct Hud {
-    const Rack   *rack;
-    SDL_Renderer *ren;
-
-    TTF_Font     *font;
-    SDL_Texture  *atlas;
-    Glyph         glyphs[NGLYPH];
-    int           line_h, char_w;
+    const Rack    *rack;
+    const AppHost *host;
+    SDL_Renderer  *ren;
+    int            line_h, char_w;   /* the lab typeface's, cached for layout */
 
     enum Mode mode;
     int    patch_slot;
@@ -59,106 +51,26 @@ struct Hud {
     Uint64 notice_until;
 
     /* layout from the last draw, for hit testing */
-    SDL_Rect panel;        /* the sheet */
-    int      body_top;
-    Row      rows[RACK_MAX_CONTROLS];
-    int      nrows;
-    int      scroll;       /* first control row shown */
-
-    int      drag_control; /* -1 when not dragging a bar */
+    SDL_Rect  panel;        /* the sheet */
+    int       body_top;
+    Row       rows[RACK_MAX_CONTROLS];
+    int       nrows;
+    int       scroll;       /* first control row shown */
+    UiControl controls[RACK_MAX_CONTROLS];   /* the rows' faders, for the shell */
+    UiSurface surface;
 };
 
-/* ---------- font ---------- */
-
-static const char *FONT_CANDIDATES[] = {
-#ifdef _WIN32
-    "C:\\Windows\\Fonts\\consola.ttf",
-    "C:\\Windows\\Fonts\\lucon.ttf",
-    "C:\\Windows\\Fonts\\cour.ttf",
-#else
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/LiberationMono-Regular.ttf",
-    "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
-    "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-#endif
-    NULL
-};
-
-static int load_font(Hud *h, float px)
-{
-    if (TTF_WasInit() == 0 && !TTF_Init()) {
-        fprintf(stderr, "hud: TTF_Init: %s\n", SDL_GetError());
-        return -1;
-    }
-    for (int i = 0; FONT_CANDIDATES[i]; i++) {
-        h->font = TTF_OpenFont(FONT_CANDIDATES[i], px);
-        if (h->font) break;
-    }
-    if (!h->font) {
-        fprintf(stderr, "hud: no monospace font found; panel has no text\n");
-        return -1;
-    }
-    h->line_h = TTF_GetFontHeight(h->font);
-
-    /* Render every printable ASCII glyph once into a single-row atlas. */
-    int total_w = 0, maxadv = 0;
-    for (int c = FIRST_GLYPH; c <= LAST_GLYPH; c++) {
-        int minx, maxx, miny, maxy, adv;
-        if (!TTF_GetGlyphMetrics(h->font, (Uint32)c, &minx, &maxx, &miny, &maxy, &adv)) adv = (int)px;
-        Glyph *g = &h->glyphs[c - FIRST_GLYPH];
-        g->advance = adv;
-        g->src = (SDL_Rect){ total_w, 0, adv + 2, h->line_h };
-        total_w += adv + 2;
-        if (adv > maxadv) maxadv = adv;
-    }
-    h->char_w = maxadv;
-
-    SDL_Surface *atlas = SDL_CreateSurface(total_w, h->line_h, SDL_PIXELFORMAT_ARGB8888);
-    if (!atlas) return -1;
-    SDL_FillSurfaceRect(atlas, NULL, 0);
-    SDL_Color white = { 255, 255, 255, 255 };
-    for (int c = FIRST_GLYPH; c <= LAST_GLYPH; c++) {
-        SDL_Surface *gs = TTF_RenderGlyph_Blended(h->font, (Uint32)c, white);
-        if (!gs) continue;
-        SDL_Rect dst = h->glyphs[c - FIRST_GLYPH].src;
-        SDL_SetSurfaceBlendMode(gs, SDL_BLENDMODE_NONE);
-        SDL_BlitSurface(gs, NULL, atlas, &dst);
-        SDL_DestroySurface(gs);
-    }
-    h->atlas = SDL_CreateTextureFromSurface(h->ren, atlas);
-    SDL_DestroySurface(atlas);
-    if (!h->atlas) return -1;
-    SDL_SetTextureBlendMode(h->atlas, SDL_BLENDMODE_BLEND);
-    return 0;
-}
+/* ---------- text: the lab's typeface, through the shell ---------- */
 
 int hud_text_width(const Hud *h, const char *s)
 {
-    if (!h->atlas) return 0;
-    int w = 0;
-    for (; *s; s++) {
-        int c = (unsigned char)*s;
-        if (c < FIRST_GLYPH || c > LAST_GLYPH) c = 63; /* '?' */
-        w += h->glyphs[c - FIRST_GLYPH].advance;
-    }
-    return w;
+    return (int)app_text_width(h->host, s);
 }
 
 void hud_text(Hud *h, int x, int y, SDL_Color col, const char *s)
 {
-    if (!h->atlas) return;
-    SDL_SetTextureColorMod(h->atlas, col.r, col.g, col.b);
-    SDL_SetTextureAlphaMod(h->atlas, col.a);
-    for (; *s; s++) {
-        int c = (unsigned char)*s;
-        if (c < FIRST_GLYPH || c > LAST_GLYPH) c = 63;
-        const Glyph *g = &h->glyphs[c - FIRST_GLYPH];
-        SDL_FRect src = hud_frect(g->src);
-        SDL_FRect dst = hud_frect((SDL_Rect){ x, y, g->src.w, g->src.h });
-        SDL_RenderTexture(h->ren, h->atlas, &src, &dst);
-        x += g->advance;
-    }
+    const UiText *t = &h->host->text;
+    if (t->draw) t->draw(t->ud, (float)x, (float)y, s, col);
 }
 
 static void textf(Hud *h, int x, int y, SDL_Color col, const char *fmt, ...)
@@ -174,19 +86,7 @@ static void textf(Hud *h, int x, int y, SDL_Color col, const char *fmt, ...)
 int  hud_line_h(const Hud *h) { return h->line_h; }
 int  hud_char_w(const Hud *h) { return h->char_w; }
 
-/* The glyph atlas as shared/ui sees it. */
-static void atlas_draw(void *ud, float x, float y, const char *s, SDL_Color c)
-{
-    hud_text(ud, (int)x, (int)y, c, s);
-}
-static float atlas_width(void *ud, const char *s) { return (float)hud_text_width(ud, s); }
-static float atlas_height(void *ud) { return (float)((const Hud *)ud)->line_h; }
-
-static UiText ui_text_for(Hud *h)
-{
-    UiText t = { atlas_draw, atlas_width, atlas_height, h };
-    return t;
-}
+static UiText ui_text_for(Hud *h) { return h->host->text; }
 
 void hud_fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
 {
@@ -205,18 +105,18 @@ void hud_text_input(Hud *h, int on)
 
 /* ---------- lifecycle & state ---------- */
 
-Hud *hud_create(SDL_Renderer *ren, const Rack *rack)
+Hud *hud_create(const AppHost *host, const Rack *rack)
 {
     Hud *h = calloc(1, sizeof *h);
     if (!h) return NULL;
     h->rack = rack;
-    h->ren = ren;
+    h->host = host;
+    h->ren = host->renderer;
     h->mode = MODE_PANEL;
-    h->drag_control = -1;
-    if (load_font(h, 13.0f) != 0) {
-        h->line_h = 14;
-        h->char_w = 7;
-    }
+    h->line_h = (int)app_text_height(host);
+    h->char_w = (int)app_text_char_w(host);
+    if (h->line_h <= 0) h->line_h = 14;
+    if (h->char_w <= 0) h->char_w = 7;
     return h;
 }
 
@@ -225,9 +125,12 @@ void hud_destroy(Hud *h)
     if (!h) return;
     for (int i = 0; i < GRAPH_MAX_TAPS; i++)
         if (h->tap_tex[i]) SDL_DestroyTexture(h->tap_tex[i]);
-    if (h->atlas) SDL_DestroyTexture(h->atlas);
-    if (h->font) TTF_CloseFont(h->font);
     free(h);
+}
+
+const UiSurface *hud_surface(const Hud *h)
+{
+    return (h->mode == MODE_PANEL && h->surface.n > 0) ? &h->surface : NULL;
 }
 
 void hud_set_mode(Hud *h, enum Mode m)  { h->mode = m; }
@@ -411,7 +314,9 @@ static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
         int on = md->bypassable ? r->enabled[c.module] : 1;
         int selected = (i == sel);
 
-        Row *row = &h->rows[h->nrows++];
+        Row *row = &h->rows[h->nrows];
+        UiControl *uc = &h->controls[h->nrows];
+        h->nrows++;
         row->control = i;
         row->rect = (SDL_FRect){ (float)body.x, (float)y, (float)row_w, (float)rowh };
         row->name = (SDL_FRect){ (float)x, (float)y, (float)name_w, (float)rowh };
@@ -421,12 +326,12 @@ static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
          * is where a click bypasses the module. */
         textf(h, x, y + 4, on ? HUD_DIM : HUD_OFF, "%.8s", md->label);
 
-        if (p->kind == PARAM_FADER || p->kind == PARAM_ENUM) {
-            ui_fader_layout_row(&row->fader, row->cell, LABEL_W(h), VALUE_W(h), &t);
-            if (p->kind == PARAM_FADER)
-                ui_fader_draw(ren, &t, &row->fader, p, r->values[i], selected);
-            else
-                ui_stepper_draw_row(ren, &t, row->cell, LABEL_W(h), VALUE_W(h), p, r->values[i], selected);
+        /* The cell is the shell's: it hit-tests uc->box and drives the fader. */
+        uc->param = i;
+        uc->box = row->cell;
+        if (p->kind == PARAM_FADER) {
+            ui_fader_layout_row(&uc->fader, row->cell, LABEL_W(h), VALUE_W(h), &t);
+            ui_fader_draw(ren, &t, &uc->fader, p, r->values[i], selected);
         } else {
             ui_stepper_draw_row(ren, &t, row->cell, LABEL_W(h), VALUE_W(h), p, r->values[i], selected);
         }
@@ -439,6 +344,9 @@ static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
         }
         y += rowh;
     }
+
+    h->surface.items = h->controls;
+    h->surface.n = h->nrows;
 
     char right[32] = "";
     if (r->ncontrols > shown) snprintf(right, sizeof right, "%d/%d", sel + 1, r->ncontrols);
@@ -457,6 +365,7 @@ void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
     if (h->mode == MODE_EDIT) draw_taps(h, ren, W, H, 1);
     if (h->mode == MODE_MAIN) draw_taps(h, ren, W, H, 0);
     h->nrows = 0;
+    h->surface.n = 0;
     if (h->mode == MODE_MAIN) {
         h->panel = (SDL_Rect){ 0, 0, 0, 0 };
         /* the bare picture still gets transient notices (mode hints, preset loads) */
@@ -476,84 +385,40 @@ static const Row *row_at(const Hud *h, float x, float y)
     return NULL;
 }
 
-static const Row *row_for_control(const Hud *h, int control)
-{
-    for (int i = 0; i < h->nrows; i++)
-        if (h->rows[i].control == control) return &h->rows[i];
-    return NULL;
-}
-
 static int in_panel(const Hud *h, float x, float y)
 {
     SDL_FRect p = hud_frect(h->panel);
     return ui_hit(&p, x, y);
 }
 
-/* The fader gestures come from shared/ui (ROADMAP section 6): drag is
- * absolute, the wheel nudges by grain, middle or double click resets. What
- * is vsynth's own here is the module name column, which bypasses. */
+/* What is left of the panel's mouse once the shell has taken the fader
+ * gestures (it hit-tests hud_surface() first): the module name column, which
+ * bypasses, and swallowing left clicks on the sheet so they do not start a
+ * window drag. Right-drag still resizes, even over the panel. Events arrive
+ * in renderer coordinates. */
 int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
 {
     if (h->mode != MODE_PANEL) return 0;
 
-    /* The rows were laid out in renderer output pixels, but SDL3 reports mouse
-     * positions in window coordinates. The two differ on a display whose pixel
-     * density is above 1, which would put every row's clickable area away from
-     * where it is drawn. Convert first; at density 1 this changes nothing. */
-    SDL_Event converted = *ev;
-    SDL_ConvertEventToRenderCoordinates(h->ren, &converted);
-    ev = &converted;
-
     switch (ev->type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         float mx = ev->button.x, my = ev->button.y;
+        if (ev->button.button != SDL_BUTTON_LEFT) return 0;
         if (!in_panel(h, mx, my)) return 0;
-        if (ev->button.button == SDL_BUTTON_RIGHT) return 0;   /* right-drag resizes, even over the panel */
         const Row *row = row_at(h, mx, my);
-        if (!row) return ev->button.button == SDL_BUTTON_LEFT;
-        Control c = rack->controls[row->control];
-        rack->set.sel = row->control;
-        if (ui_hit(&row->name, mx, my)) {
-            if (ev->button.button == SDL_BUTTON_LEFT) rack_toggle_module(rack, voice, c.module);
-            return 1;
+        if (row && ui_hit(&row->name, mx, my)) {
+            rack->set.sel = row->control;
+            rack_toggle_module(rack, voice, rack->controls[row->control].module);
         }
-        if (ui_is_reset_click(ev)) { rack_reset_control(rack, voice, row->control); h->drag_control = -1; return 1; }
-        if (ev->button.button != SDL_BUTTON_LEFT) return 1;
-        const Param *p = &rack->params[row->control];
-        if (p->kind == PARAM_FADER) {
-            h->drag_control = row->control;
-            rack_set_control(rack, voice, row->control,
-                             ui_fader_value_at(&row->fader, p, mx, my));
-        } else if (c.knob < 0) {
-            rack_toggle_module(rack, voice, c.module);
-        } else {
-            rack_nudge(rack, voice, +1, PARAM_FINE);   /* an enum steps on click */
-        }
-        return 1;
-    }
-    case SDL_EVENT_MOUSE_MOTION: {
-        if (h->drag_control < 0) return in_panel(h, ev->motion.x, ev->motion.y);
-        const Row *row = row_for_control(h, h->drag_control);
-        if (row) rack_set_control(rack, voice, h->drag_control,
-                                  ui_fader_value_at(&row->fader, &rack->params[h->drag_control],
-                                                    ev->motion.x, ev->motion.y));
         return 1;
     }
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (h->drag_control >= 0) { h->drag_control = -1; return 1; }
         return ev->button.button == SDL_BUTTON_LEFT && in_panel(h, ev->button.x, ev->button.y);
     case SDL_EVENT_MOUSE_WHEEL: {
-        /* The wheel event carries no usable position, so ask for the pointer.
-         * That answer is in window coordinates and needs the same conversion. */
         float wx, wy, mx, my;
         SDL_GetMouseState(&wx, &wy);
         SDL_RenderCoordinatesFromWindow(h->ren, wx, wy, &mx, &my);
-        const Row *row = row_at(h, mx, my);
-        if (!row) return in_panel(h, mx, my);
-        rack->set.sel = row->control;
-        int dir = ev->wheel.y > 0 ? 1 : ev->wheel.y < 0 ? -1 : 0;
-        if (dir) rack_nudge(rack, voice, dir, ui_grain(SDL_GetModState()));
-        return 1;
+        return in_panel(h, mx, my);
     }
     default:
         return 0;

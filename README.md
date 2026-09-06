@@ -39,9 +39,17 @@ makes a sequencer that is also a wavetable player possible, and it is why one
 app (MONITOR) will own the only connection to the speakers while every other
 app writes to a bus.
 
-None of that exists yet. The next steps are vsynth on the shared fader (P4),
-one shared app shell and one typeface (P5), then the launcher and the buses
-(P6). Phases are in ROADMAP section 8.
+The launcher and the buses do not exist yet; they are P6. What does exist: both
+apps run on one shared control (P4) and on one shell, `shared/app`, which owns
+the window, the frame loop, the typeface and every fader gesture, so an app is
+a struct plus a table of functions and its executable is a one-line stub
+(P5). The remaining P5 item is the typeface itself: until one is chosen and
+shipped in `assets/fonts/`, the shell uses a system monospace face and says so
+on stderr. Phases are in ROADMAP section 8.
+
+Every app takes `--screenshot FILE.bmp` (the window, two seconds after start)
+and saves `F12` screenshots to its data folder or to `--shots DIR`. Both come
+from the shell.
 
 ## Layout
 
@@ -51,11 +59,11 @@ apps/video-synth/       video feedback synth; PRD.md there is its design
 shared/                 code used by more than one app; its README lists the libraries
 shared/param/           the fader and parameter model, plain C, tested offline
 shared/ui/              the control surface on SDL3: how a fader looks and behaves, one palette
-shared/app/             the app shell: SDL boot, frame loop, gesture dispatch (planned, P5)
+shared/app/             the app shell: SDL boot, window, frame loop, typeface, gesture dispatch, screenshots
 shared/bus/             named in-process signal buses, audio and control rate (planned, P6)
 launcher/               hosts the apps in one process (planned, P6)
-tools/package.sh        release packaging: exe plus the DLLs it links
-assets/fonts/           the lab's typeface (planned, P5)
+tools/package.sh        release packaging: exe, the DLLs it links, the fonts
+assets/fonts/           the lab's typeface; drop one .ttf here and the shell uses it (to be chosen, P5)
 assets/screenshots/     screenshots; Drone Commander so far
 .github/workflows/      CI: build, test, artifacts, tagged releases
 CMakeLists.txt          the one CMake project; CMakePresets.json for editors

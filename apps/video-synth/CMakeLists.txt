@@ -9,8 +9,10 @@ pkg_check_modules(AV REQUIRED IMPORTED_TARGET
     libavfilter libavformat libavcodec libavdevice libavutil)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 
-add_executable(vsynth
-    src/main.c
+# The app as a library plus a thin exe stub (ROADMAP D11, P6): the launcher
+# will link vsynth_app and host VSYNTH; run alone, main.c is one call.
+add_library(vsynth_app
+    src/app.c
     src/window.c
     src/voice.c
     src/rack.c
@@ -22,11 +24,13 @@ add_executable(vsynth
     src/help.c
     src/options.c
 )
-
-target_include_directories(vsynth PRIVATE src)
-target_link_libraries(vsynth PRIVATE
-    avsynth_param avsynth_ui
+target_include_directories(vsynth_app PUBLIC src)
+target_link_libraries(vsynth_app PUBLIC
+    avsynth_app avsynth_param avsynth_ui
     avsynth_flags PkgConfig::AV PkgConfig::SDL3 PkgConfig::SDL3_TTF PkgConfig::SQLITE)
+
+add_executable(vsynth src/main.c)
+target_link_libraries(vsynth PRIVATE vsynth_app)
 
 if(WIN32)
     # Console subsystem on purpose: stderr is the status line for now.

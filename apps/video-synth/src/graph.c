@@ -11,7 +11,12 @@
 /* ---------- error capture ----------
  * libavfilter reports the useful part of a parse or config failure through
  * av_log, not the return code. While a build runs we copy AV_LOG_ERROR lines
- * into a buffer so the editor can show them verbatim. */
+ * into a buffer so the editor can show them verbatim.
+ *
+ * Process-wide on purpose, the one documented exception to D12: av_log's
+ * callback is a single global with no user pointer, so there is nowhere else
+ * for this to live. Graphs are only ever built on the main thread, one at a
+ * time, so two instances cannot interleave a capture. */
 
 static char  cap_buf[GRAPH_ERR_CAP];
 static int   cap_on;

@@ -72,7 +72,7 @@ static int open_source(Voice *v, AVFormatContext **out_fmt, AVCodecContext **out
     snprintf(buf, sizeof buf, "%d", cfg->cap_y); av_dict_set(&opts, "offset_y", buf, 0);
 #else
     ifmt = av_find_input_format("x11grab");
-    static char x11url[64];
+    char x11url[64];   /* consumed by avformat_open_input below, so a local is enough */
     const char *display = getenv("DISPLAY");
     snprintf(x11url, sizeof x11url, "%s+%d,%d", display ? display : ":0.0", cfg->cap_x, cfg->cap_y);
     url = x11url;
@@ -270,6 +270,8 @@ out:
 
 Voice *voice_start(const VoiceConfig *cfg)
 {
+    /* Process-wide libavdevice registration, once. A documented exception to
+     * D12: it is library init, not instance state, and it is idempotent. */
     static int registered;
     if (!registered) { avdevice_register_all(); registered = 1; }
 

@@ -262,6 +262,23 @@ static void test_set(void)
     check_near(values[0], 1400.0, 1e-9, "reset_all restores every neutral");
     check_near(values[1], 0.0, 1e-12, "reset_all on the level");
 
+    /* step: a fader moves one fine step, a discrete control wraps */
+    paramset_reset_all(&s);
+    paramset_step(&s, 1, +1);
+    check_near(values[1], defs[1].fine, 1e-12, "step on a fader is one fine step");
+    static const char *const NAMES[3] = { "a", "b", "c" };
+    Param e = {0};
+    snprintf(e.group, sizeof e.group, "%s", "x");
+    snprintf(e.key, sizeof e.key, "%s", "mode");
+    e.kind = PARAM_ENUM; e.min = 0; e.max = 2; e.neutral = 0; e.names = NAMES; e.nnames = 3;
+    double ev = 0;
+    ParamSet es;
+    paramset_init(&es, &e, &ev, 1);
+    paramset_step(&es, 0, +1); paramset_step(&es, 0, +1); paramset_step(&es, 0, +1);
+    check_near(ev, 0.0, 1e-12, "step wraps an enum forward");
+    paramset_step(&es, 0, -1);
+    check_near(ev, 2.0, 1e-12, "step wraps an enum backward");
+
     char buf[96];
     paramset_describe(&s, 0, buf, sizeof buf);
     check(strstr(buf, "vcf.cutoff") != NULL, "describe names the address");

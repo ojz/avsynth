@@ -103,6 +103,9 @@ void paramset_select(ParamSet *s, int dir);
 void paramset_set(ParamSet *s, int i, double v);
 void paramset_set_norm(ParamSet *s, int i, double t);
 void paramset_nudge(ParamSet *s, int i, int steps, ParamGrain g);
+/* One position in either direction: a fader moves one fine step, a switch
+ * or enum advances to the next name and wraps. What a click or an arrow does. */
+void paramset_step(ParamSet *s, int i, int dir);
 void paramset_reset(ParamSet *s, int i);
 void paramset_reset_all(ParamSet *s);
 /* "vcf.cutoff  1400.0 Hz", one line for a title bar or a log. */

@@ -72,15 +72,19 @@ What is honestly not done yet, and why it blocks cranking out apps:
 1. ~~**`shared/ui` has exactly one consumer.**~~ Resolved by P4: vsynth runs on
    the fader with its parameters derived at runtime, in a row form the library
    gained for it. Two consumers, two layouts, one gesture table.
-2. **There is no shell.** A third app would copy `main.c`'s SDL boot and frame
-   loop, and copy `panel.c`'s event switch — which is the D8 gesture table
-   transcribed by hand. Transcribed twice, it stops being one table. P5.
-3. **Text is a placeholder in both apps, differently.** Neither choice is a
-   decision. The font is lab-wide and belongs in the shell (D13, P5).
-4. **Both apps keep mutable file-scope state.** `panel.c` holds `VALUES[]`,
-   `BOXES[]`, `FADERS[]` and `LAID_OUT`; `graph.c` holds `cap_on`; `rack.c`
-   held `rng_state` until P4 moved it into the `Rack`. Small now, a week's
-   work at ten apps (D12, P5).
+2. ~~**There is no shell.**~~ Resolved by P5: `shared/app` owns SDL boot, the
+   window, the frame loop, the event pump and the one gesture table. Neither
+   app has an event switch for a fader any more; each is a struct plus an
+   `AppSpec`, and its executable is a one-line stub.
+3. **Text is a placeholder.** Half resolved: the shell renders one typeface
+   through one atlas for both apps, from `assets/fonts/` when a face is there.
+   No face is there yet, so a system monospace stands in. Choosing it is the
+   user's (D13); it is the open half of P5.
+4. ~~**Both apps keep mutable file-scope state.**~~ Resolved by P5: the panel's
+   arrays live in `PanelState`, vsynth's `App` is allocated by `create()`, the
+   rack's scratch is on the heap. Two documented exceptions remain in vsynth,
+   both library-global by nature: libavfilter's log callback (`graph.c`) and
+   libavdevice registration (`voice.c`).
 
 ## 4. Decisions
 
@@ -106,7 +110,8 @@ goes there.** The libraries, in the order they are extracted:
 1. `shared/param`: the fader and parameter model (D8). Plain C, no SDL. *Done.*
 2. `shared/ui`: how a fader is drawn and driven, on SDL3. *Done, two consumers.*
 3. `shared/app`: the shell (D14). Window, frame loop, gesture dispatch, text,
-   palette, and the app ABI the launcher later loads.
+   palette, and the app ABI the launcher later loads. *Done, both apps on it;
+   the typeface file itself is still to be chosen.*
 4. `shared/bus`: named in-process signal buses (D11, D9). Lock-free rings.
 5. `shared/store`: presets and projects in SQLite, including generative ones.
 6. `shared/link`: the external adapter — OSC/UDP to another machine, and MIDI.
@@ -238,22 +243,41 @@ table of functions:
 
 ```c
 typedef struct AppSpec {
-    const char *name;                        /* "drone-commander" */
+    const char *name, *title;                /* "vsynth": data folder, log prefix */
     int   window_w, window_h;
-    void *(*create)(AppHost *host);          /* returns the instance */
+    SDL_WindowFlags window_flags;            /* e.g. SDL_WINDOW_BORDERLESS */
+    SDL_InitFlags   init_flags;              /* e.g. SDL_INIT_AUDIO */
+    void *(*create)(AppHost *host, int argc, char **argv);  /* the instance, or NULL */
     void  (*destroy)(void *self);
-    bool  (*event)(void *self, const SDL_Event *ev);    /* app-level keys only */
-    void  (*frame)(void *self, SDL_Renderer *r);        /* the app's picture */
-    void  (*audio)(void *self, float *out, int frames); /* optional */
-    ParamSet *(*params)(void *self);         /* the shell drives these */
+    bool  (*event)(void *self, const SDL_Event *ev);    /* see the order below */
+    void  (*tick)(void *self);                          /* per loop, before frame */
+    void  (*frame)(void *self, SDL_Renderer *r);        /* the whole window */
+    ParamSet        *(*params)(void *self);             /* the shell drives these */
+    const UiSurface *(*surface)(void *self);            /* the laid-out controls */
+    void  (*changed)(void *self, int param);            /* a value or the selection moved */
 } AppSpec;
 ```
 
-The shell owns the gesture dispatch: it hit-tests the fader boxes, applies
-`ui_grain`, `ui_fader_value_at`, `paramset_nudge` and the reset gestures, and
-calls the app's apply callback. The app's `event` only sees what the shell did
-not consume. `AppHost` is how an app reaches its buses, its store and its
-window — supplied by the exe stub when run alone, by the launcher when hosted.
+The shell owns the gesture dispatch. The app lays out its controls into a
+`UiSurface` (which parameter, which box, which fader geometry) and the shell
+hit-tests it: drag sets, wheel nudges by `ui_grain`, middle or double click
+resets, a click on a switch or enum steps it, Tab selects, arrows nudge,
+Backspace resets. After any of these it calls `changed`. The event order is
+fixed: **mouse events go to the shell first** and only a hit on a control is
+consumed, so an app can still use the rest of the window (vsynth's borderless
+drag and its module-name column); **keyboard events go to the app first**, so a
+mode that owns the keyboard (vsynth's chain editor) sees every key, and only
+what the app declines reaches the shell. Mouse events reach the app already in
+renderer coordinates.
+
+The shell also owns what every app wants and none should write twice: the
+typeface (one glyph atlas, from `assets/fonts/`), `--screenshot FILE.bmp` and
+`F12` with `--shots DIR`, stripped from argv before the app sees it. `AppHost`
+is how an app reaches its window, its renderer, the lab's text and its data
+folder, and later its buses and its store — supplied by the exe stub when run
+alone, by the launcher when hosted. The `audio` callback in the first sketch
+is gone: an app that makes sound writes to a bus (P6), and only MONITOR opens
+a device.
 
 ### 5.4 `shared/bus`
 
@@ -485,18 +509,29 @@ discovered at runtime from the chain text. What the test found:
   into the `Rack` (D12), and vsynth's palette took the shared theme's values.
 
 **P5. `shared/app`: the shell, the identity, and owned state.** The phase that
-makes a new app cheap.
-- Extract the SDL boot, the frame loop, the event pump and the D8 gesture
+makes a new app cheap. **Shell and owned state done 2026-09-06; the typeface
+and the identity are open, waiting on the user (D13).**
+- ~~Extract the SDL boot, the frame loop, the event pump and the D8 gesture
   dispatcher out of `panel.c` and `hud.c` into one shell (D14), behind the
-  `AppSpec` of section 5.3. Both existing apps move onto it.
-- One typeface, chosen by the user, shipped in `assets/fonts/`, loaded from
-  there by both apps; the system-font hunt in `hud.c` goes away. One palette.
-  A first pass at the lab's visual identity, presented as options (D13).
-- Kill mutable file-scope state in both apps (D12): `VALUES[]`, `BOXES[]`,
-  `FADERS[]`, `LAID_OUT`, `cap_on`, `rng_state`.
+  `AppSpec` of section 5.3. Both existing apps move onto it.~~ Done. Each app
+  is now a library plus a one-line exe stub, which is the shape P6 needs.
+  Drone Commander's spec is about 200 lines; vsynth's is its old `main.c`
+  reorganised into create, event, tick and frame, the same length with the
+  window, screenshot and fader-key code gone and the shell plumbing added.
+- One typeface, chosen by the user, shipped in `assets/fonts/`. The mechanism
+  is done: the shell loads the first `.ttf` or `.otf` it finds there (or in
+  `fonts/` next to a packaged exe), renders one atlas, and hands the same
+  `UiText` to `shared/ui` and to both apps; the package step ships the folder.
+  The file is not: a system monospace stands in and the log says so. One
+  palette is in `shared/ui` and both apps use its values. A first pass at the
+  lab's visual identity, presented as options (D13), is the remaining work.
+- ~~Kill mutable file-scope state in both apps (D12).~~ Done, with two
+  documented exceptions that are library-global by nature (`graph.c`'s log
+  capture, `voice.c`'s device registration).
 - *Exit:* a new app reaches a first window with working faders in roughly 200
   lines of its own code, and neither existing app writes an event switch for a
-  fader.
+  fader. The second half holds today; the first is to be proven by MONITOR in
+  P6.
 
 **P6. The launcher and `shared/bus`.** D11 made real.
 - Each app builds as a library plus a thin exe stub; `make run-<app>` is

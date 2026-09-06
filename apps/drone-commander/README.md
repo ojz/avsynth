@@ -66,6 +66,9 @@ The rest:
   are zero.
 - `Ctrl+Shift+A` or click the banner: deliberately enable audio
 - `Space` or click the banner: mute audio immediately
+- `F12`: save a screenshot to the app's data folder, or to `--shots DIR`;
+  `--screenshot FILE.bmp` saves one two seconds after start. Both come from the
+  shell, so every app has them.
 - `Escape`: quit
 
 ## Signal Path

@@ -465,8 +465,6 @@ void rack_adopt(Rack *dst, const Rack *src)
 
 int rack_from_chain(Rack *r, const char *chain, int cap_w, int cap_h, char *err, size_t err_cap)
 {
-    static Rack tmp;   /* large; main thread only */
-    memset(&tmp, 0, sizeof tmp);
     if (strlen(chain) >= RACK_CHAIN_CAP) {
         if (err) snprintf(err, err_cap, "chain longer than %d bytes", RACK_CHAIN_CAP - 1);
         return -1;
@@ -476,25 +474,37 @@ int rack_from_chain(Rack *r, const char *chain, int cap_w, int cap_h, char *err,
     Graph g;
     if (graph_build(&spec, &g, err, err_cap) < 0) return -1;
 
-    copy_str(tmp.chain, sizeof tmp.chain, chain);
-    static Written written[RACK_MAX_MODULES];
+    /* Scratch on the heap: a Rack is large, and nothing here may be shared
+     * between two instances deriving at once (D12). */
+    Rack *tmp = calloc(1, sizeof *tmp);
+    Written *written = calloc(RACK_MAX_MODULES, sizeof *written);
+    if (!tmp || !written) {
+        free(tmp); free(written);
+        graph_free(&g);
+        if (err) snprintf(err, err_cap, "out of memory");
+        return -1;
+    }
+
+    copy_str(tmp->chain, sizeof tmp->chain, chain);
     int nwritten = scan_written(chain, written, RACK_MAX_MODULES);
     int seg = 0;
     for (unsigned i = 0; i < g.graph->nb_filters; i++) {
         AVFilterContext *f = g.graph->filters[i];
         if (graph_is_helper(f)) continue;
         /* filters are created in text order, so the n-th user filter is the n-th segment */
-        derive_module(&tmp, f, seg < nwritten ? &written[seg] : NULL);
+        derive_module(tmp, f, seg < nwritten ? &written[seg] : NULL);
         seg++;
     }
-    tmp.ntaps = g.ntaps;
-    for (int i = 0; i < g.ntaps; i++) copy_str(tmp.tap_names[i], sizeof tmp.tap_names[i], g.tap_names[i]);
+    tmp->ntaps = g.ntaps;
+    for (int i = 0; i < g.ntaps; i++) copy_str(tmp->tap_names[i], sizeof tmp->tap_names[i], g.tap_names[i]);
     graph_free(&g);
 
-    param_finish_all(tmp.params, tmp.ncontrols);
-    tmp.set.sel = 0;
-    tmp.rng_state = r->rng_state;   /* a re-derived rack keeps rolling the same dice */
-    rack_adopt(r, &tmp);
+    param_finish_all(tmp->params, tmp->ncontrols);
+    tmp->set.sel = 0;
+    tmp->rng_state = r->rng_state;   /* a re-derived rack keeps rolling the same dice */
+    rack_adopt(r, tmp);
+    free(written);
+    free(tmp);
     return 0;
 }
 
