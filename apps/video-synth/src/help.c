@@ -40,10 +40,10 @@ struct Help {
     char snippet[SNIPPET_CAP];
 };
 
-static const SDL_Color C_TEXT  = { 235, 235, 235, 255 };
-static const SDL_Color C_DIM   = { 150, 150, 150, 255 };
-static const SDL_Color C_TITLE = { 255, 150,  30, 255 };
-static const SDL_Color C_LIVE  = { 120, 220, 120, 255 };
+static const SDL_Color C_TEXT  = { 235, 231, 216, 255 };
+static const SDL_Color C_DIM   = { 156, 159, 150, 255 };
+static const SDL_Color C_TITLE = { 232, 168,  56, 255 };
+static const SDL_Color C_LIVE  = { 108, 200, 138, 255 };
 
 /* ---------- filter list ---------- */
 

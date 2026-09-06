@@ -26,8 +26,8 @@ grains so a value can actually be dialled in. It carries a stable address, so a
 preset, a MIDI CC or a sequencer step can drive it without the app knowing
 which. That is the lab's shared control language, specified in
 [ROADMAP.md](ROADMAP.md) section 6 and implemented once in `shared/param` and
-`shared/ui`. Drone Commander runs on it today. vsynth still draws its own knob
-rows and moves onto the fader in phase P4, which is the work in progress.
+`shared/ui`. Both apps run on it: Drone Commander as a spatial panel, vsynth as
+one row per control, the same fader in two arrangements.
 
 ## Where this is going
 

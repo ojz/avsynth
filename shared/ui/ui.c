@@ -91,6 +91,27 @@ void ui_fader_layout(UiFader *f, SDL_FRect box, UiOrient o, const UiText *t)
     }
 }
 
+void ui_fader_layout_row(UiFader *f, SDL_FRect box, float label_w, float value_w,
+                         const UiText *t)
+{
+    const float lh = text_h(t);
+    const float gap = 8.0f;
+    const float cy = box.y + box.h * 0.5f;
+    f->box = box;
+    f->orient = UI_H;
+    f->label = (SDL_FRect){ box.x, cy - lh * 0.5f, label_w, lh };
+    f->value = (SDL_FRect){ box.x + box.w - value_w, cy - lh * 0.5f, value_w, lh };
+    /* The track keeps its thickness unless the row is too short for the
+     * handle's overhang, then it thins so nothing draws outside the row. */
+    float th = THEME.track_h;
+    if (th + 2.0f * THEME.handle_over > box.h) th = box.h - 2.0f * THEME.handle_over;
+    if (th < 2.0f) th = 2.0f;
+    float tx = box.x + label_w + gap;
+    float tw = box.w - label_w - value_w - 2.0f * gap;
+    if (tw < 8.0f) tw = 8.0f;
+    f->track = (SDL_FRect){ tx, cy - th * 0.5f, tw, th };
+}
+
 /* Where along the track a normalised position sits, in pixels. */
 static float track_pos(const UiFader *f, double t)
 {
@@ -188,6 +209,36 @@ void ui_stepper_draw(SDL_Renderer *r, const UiText *t, SDL_FRect box,
     ui_fill(r, well, THEME.track);
     ui_rect(r, well, selected ? THEME.accent : (on ? THEME.fill : THEME.fill_off));
     text_at(t, box.x, box.y, p->label, selected ? THEME.accent : THEME.ink_dim);
+    float rw = text_w(t, readout);
+    text_at(t, well.x + (well.w - rw) * 0.5f, well.y + (well.h - lh) * 0.5f, readout, ink);
+}
+
+void ui_stepper_draw_row(SDL_Renderer *r, const UiText *t, SDL_FRect box,
+                         float label_w, float value_w,
+                         const Param *p, double value, int selected)
+{
+    const float lh = text_h(t);
+    const float gap = 8.0f;
+    const float cy = box.y + box.h * 0.5f;
+    SDL_Color ink = selected ? THEME.accent : THEME.ink;
+    char readout[64];
+    param_format_value(p, value, readout, sizeof readout);
+
+    if (selected) {
+        SDL_Color wash = { THEME.accent.r, THEME.accent.g, THEME.accent.b, 34 };
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+        ui_fill(r, box, wash);
+    }
+
+    float wh = lh + 4.0f;
+    if (wh > box.h) wh = box.h;
+    SDL_FRect well = { box.x + label_w + gap, cy - wh * 0.5f,
+                       box.w - label_w - value_w - 2.0f * gap, wh };
+    if (well.w < 8.0f) well.w = 8.0f;
+    int on = value >= 0.5;
+    ui_fill(r, well, THEME.track);
+    ui_rect(r, well, selected ? THEME.accent : (on ? THEME.fill : THEME.fill_off));
+    text_at(t, box.x, cy - lh * 0.5f, p->label, selected ? THEME.accent : THEME.ink_dim);
     float rw = text_w(t, readout);
     text_at(t, well.x + (well.w - rw) * 0.5f, well.y + (well.h - lh) * 0.5f, readout, ink);
 }

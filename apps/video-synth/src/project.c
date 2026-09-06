@@ -274,11 +274,14 @@ int project_save_preset(Project *p, int chain_id, int slot, const char *name, co
     for (int m = 0; m < rack->nmods; m++) {
         const ModuleDef *md = &rack->mods[m];
         for (int k = 0; k < md->nknobs; k++) {
+            int c = md->control[k];
             sqlite3_reset(ins_val);
             sqlite3_bind_int64(ins_val, 1, preset_id);
             sqlite3_bind_text(ins_val, 2, md->name, -1, SQLITE_STATIC);
-            sqlite3_bind_text(ins_val, 3, md->knobs[k].opt, -1, SQLITE_STATIC);
-            sqlite3_bind_double(ins_val, 4, rack->values[m][k]);
+            sqlite3_bind_text(ins_val, 3, rack->cmds[c].opt, -1, SQLITE_STATIC);
+            /* Stored as libavfilter sees it (an enum's constant, not the
+             * fader's index) so files written before the fader still load. */
+            sqlite3_bind_double(ins_val, 4, rack_get_raw(rack, c));
             sqlite3_step(ins_val);
         }
         if (md->bypassable) {
@@ -314,18 +317,14 @@ int project_load_preset(Project *p, int chain_id, int slot, Rack *rack)
     sqlite3_finalize(st);
 
     /* Start from neutral so knobs missing in an old preset land somewhere sane. */
-    for (int m = 0; m < rack->nmods; m++) {
-        rack->enabled[m] = rack->mods[m].enabled_default;
-        for (int k = 0; k < rack->mods[m].nknobs; k++)
-            rack->values[m][k] = rack->mods[m].knobs[k].neutral;
-    }
+    rack_neutral(rack);
 
     if (sqlite3_prepare_v2(p->db, "SELECT target, option, value FROM preset_value WHERE preset_id = ?", -1, &st, NULL)) return -1;
     sqlite3_bind_int64(st, 1, preset_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
         int m = rack_find_module(rack, (const char *)sqlite3_column_text(st, 0));
-        int k = rack_find_knob(rack, m, (const char *)sqlite3_column_text(st, 1));
-        if (m >= 0 && k >= 0) rack->values[m][k] = sqlite3_column_double(st, 2);
+        int c = rack_find_control(rack, m, (const char *)sqlite3_column_text(st, 1));
+        if (c >= 0) rack_set_raw(rack, c, sqlite3_column_double(st, 2));
     }
     sqlite3_finalize(st);
 
@@ -333,7 +332,7 @@ int project_load_preset(Project *p, int chain_id, int slot, Rack *rack)
     sqlite3_bind_int64(st, 1, preset_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
         int m = rack_find_module(rack, (const char *)sqlite3_column_text(st, 0));
-        if (m >= 0) rack->enabled[m] = sqlite3_column_int(st, 1) ? 1 : 0;
+        if (m >= 0) rack_set_enabled(rack, NULL, m, sqlite3_column_int(st, 1));
     }
     sqlite3_finalize(st);
     return 0;

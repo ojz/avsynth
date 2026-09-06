@@ -25,6 +25,7 @@ add_executable(vsynth
 
 target_include_directories(vsynth PRIVATE src)
 target_link_libraries(vsynth PRIVATE
+    avsynth_param avsynth_ui
     avsynth_flags PkgConfig::AV PkgConfig::SDL3 PkgConfig::SDL3_TTF PkgConfig::SQLITE)
 
 if(WIN32)

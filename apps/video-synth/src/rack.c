@@ -34,7 +34,7 @@ const char RACK_DEFAULT_CHAIN[] =
 /* ---------- override table ----------
  * Good ranges for options whose libavfilter bounds are useless, plus virtual
  * knobs (parse != NULL) that read one number out of an expression option and
- * drive one or two options with printf formats. */
+ * drive one or two options with printf formats. step is the fine grain. */
 typedef struct Override {
     const char *filter, *opt, *label;
     double min, max, step;
@@ -230,7 +230,9 @@ static int option_is_int(const AVOption *o)
            o->type == AV_OPT_TYPE_UINT64 || o->type == AV_OPT_TYPE_BOOL;
 }
 
-static void heuristic_range(const AVOption *o, double cur, KnobDef *kd)
+/* A range for an option the override table does not know. Bounded and not
+ * absurd: take libavfilter's. Otherwise a window around the written value. */
+static void heuristic_range(const AVOption *o, double cur, Param *p, KnobCmd *cmd, double *step)
 {
     int is_int = option_is_int(o);
     double lo = o->type == AV_OPT_TYPE_STRING ? -INFINITY : o->min;
@@ -239,27 +241,64 @@ static void heuristic_range(const AVOption *o, double cur, KnobDef *kd)
 
     int bounded = isfinite(lo) && isfinite(hi) && hi - lo <= 1000 && hi > lo;
     if (bounded) {
-        kd->min = lo; kd->max = hi;
+        p->min = lo; p->max = hi;
     } else {
         double span = fabs(cur) * 2;
         if (span < 1) span = 1;
-        kd->min = cur - span; kd->max = cur + span;
-        if (isfinite(lo) && kd->min < lo) kd->min = lo;
-        if (isfinite(hi) && kd->max > hi) kd->max = hi;
+        p->min = cur - span; p->max = cur + span;
+        if (isfinite(lo) && p->min < lo) p->min = lo;
+        if (isfinite(hi) && p->max > hi) p->max = hi;
     }
     if (is_int) {
-        kd->step = 1;
-        copy_str(kd->fmt, sizeof kd->fmt, "%.0f");
+        *step = 1;
+        copy_str(cmd->fmt, sizeof cmd->fmt, "%.0f");
     } else {
-        kd->step = (kd->max - kd->min) / 200;
-        kd->fmt[0] = 0;
+        *step = (p->max - p->min) / 200;
+        cmd->fmt[0] = 0;
     }
 }
 
-static void add_control(Rack *r, int m, int k)
+/* The three grains from the one step the table or the heuristic gave. An
+ * integer option has no grain below 1: its ultra step is its fine step. */
+static void set_grains(Param *p, double step, int is_int)
 {
-    if (r->ncontrols < RACK_MAX_CONTROLS)
-        r->controls[r->ncontrols++] = (Control){ m, k };
+    p->fine   = step;
+    p->coarse = step * 10.0;
+    p->ultra  = is_int ? step : step / 10.0;
+}
+
+/* Fill an enum's constant table from the option's unit. Returns the index of
+ * the current value, or -1 if it is not one of the constants. */
+static int enum_table(AVFilterContext *f, const AVOption *o, long long cur, KnobCmd *cmd)
+{
+    const AVClass *cls = f->filter->priv_class;
+    const AVOption *c = NULL;
+    int at = -1;
+    cmd->nenum = 0;
+    while ((c = av_opt_next(&cls, c))) {
+        if (c->type != AV_OPT_TYPE_CONST || !c->unit || strcmp(c->unit, o->unit)) continue;
+        if (cmd->nenum >= RACK_MAX_ENUM) break;
+        /* Two names for one value (a long and a short form): keep the first. */
+        int dup = 0;
+        for (int i = 0; i < cmd->nenum; i++) if (cmd->enum_vals[i] == c->default_val.i64) dup = 1;
+        if (dup) continue;
+        cmd->enum_names[cmd->nenum] = c->name;
+        cmd->enum_vals[cmd->nenum] = c->default_val.i64;
+        if (c->default_val.i64 == cur) at = cmd->nenum;
+        cmd->nenum++;
+    }
+    return at;
+}
+
+static int add_control(Rack *r, int m, int k)
+{
+    if (r->ncontrols >= RACK_MAX_CONTROLS) return -1;
+    int c = r->ncontrols++;
+    r->controls[c] = (Control){ m, k };
+    memset(&r->params[c], 0, sizeof r->params[c]);
+    memset(&r->cmds[c], 0, sizeof r->cmds[c]);
+    r->values[c] = 0;
+    return c;
 }
 
 static void module_label(Rack *r, int m, const AVFilterContext *f)
@@ -284,6 +323,7 @@ static void derive_module(Rack *r, AVFilterContext *f, const Written *written)
     int m = r->nmods++;
     ModuleDef *md = &r->mods[m];
     memset(md, 0, sizeof *md);
+    md->bypass_control = -1;
     copy_str(md->name, sizeof md->name, f->name);
     copy_str(md->filter, sizeof md->filter, f->filter->name);
     module_label(r, m, f);
@@ -317,51 +357,110 @@ static void derive_module(Rack *r, AVFilterContext *f, const Written *written)
             if (skip) continue;
 
             const Override *ov = find_override(md->filter, o->name);
-            KnobDef *kd = &md->knobs[md->nknobs];
-            memset(kd, 0, sizeof *kd);
-            double cur;
+            if (ov && ov->step <= 0) continue;   /* explicitly never a knob */
 
+            double cur;
+            char opt2[32] = "", fmt2[24] = "";
             if (ov && ov->parse) {
                 uint8_t *s = NULL;
                 if (av_opt_get(f->priv, o->name, 0, &s) < 0 || !s) continue;
                 int ok = sscanf((const char *)s, ov->parse, &cur) == 1;
                 av_free(s);
                 if (!ok) continue;
-                copy_str(kd->opt2, sizeof kd->opt2, ov->opt2);
-                copy_str(kd->fmt2, sizeof kd->fmt2, ov->fmt2);
-                if (ov->opt2 && ncovered < (int)(sizeof covered / sizeof covered[0])) covered[ncovered++] = ov->opt2;
+                copy_str(opt2, sizeof opt2, ov->opt2);
+                copy_str(fmt2, sizeof fmt2, ov->fmt2);
             } else {
                 if (!option_number(f, o, &cur)) continue;
             }
-            if (ov && ov->step <= 0) continue;   /* explicitly never a knob */
 
-            copy_str(kd->opt, sizeof kd->opt, o->name);
+            int c = add_control(r, m, md->nknobs);
+            if (c < 0) break;
+            Param *p = &r->params[c];
+            KnobCmd *cmd = &r->cmds[c];
+            copy_str(cmd->opt, sizeof cmd->opt, o->name);
+            copy_str(cmd->opt2, sizeof cmd->opt2, opt2);
+            copy_str(cmd->fmt2, sizeof cmd->fmt2, fmt2);
+            if (opt2[0] && ncovered < (int)(sizeof covered / sizeof covered[0])) covered[ncovered++] = ov->opt2;
+
+            copy_str(p->group, sizeof p->group, md->label);
+            copy_str(p->key, sizeof p->key, o->name);
+            p->kind = PARAM_FADER;
+
+            double step;
+            int is_int = option_is_int(o);
             if (ov) {
-                copy_str(kd->label, sizeof kd->label, ov->label);
-                kd->min = ov->min; kd->max = ov->max; kd->step = ov->step;
-                copy_str(kd->fmt, sizeof kd->fmt, ov->fmt);
-                if (cur < kd->min) kd->min = cur;
-                if (cur > kd->max) kd->max = cur;
+                copy_str(p->label, sizeof p->label, ov->label);
+                p->min = ov->min; p->max = ov->max; step = ov->step;
+                copy_str(cmd->fmt, sizeof cmd->fmt, ov->fmt);
+                if (cur < p->min) p->min = cur;
+                if (cur > p->max) p->max = cur;
+                if (ov->fmt && !strcmp(ov->fmt, "%.0f")) is_int = 1;
             } else {
-                copy_str(kd->label, sizeof kd->label, o->name);
-                heuristic_range(o, cur, kd);
+                copy_str(p->label, sizeof p->label, o->name);
+                heuristic_range(o, cur, p, cmd, &step);
             }
-            kd->neutral = cur;
+            p->neutral = cur;
+            /* A range that crosses zero fills outward from the written value,
+             * so a shift left and a shift right read as what they are. */
+            p->taper = (p->min < 0 && p->max > 0) ? PARAM_BIPOLAR : PARAM_LINEAR;
+            set_grains(p, step, is_int);
+
             if (o->unit && option_is_int(o)) {
-                /* enum: step through the constants by value, show their names */
-                kd->cls = f->filter->priv_class;
-                kd->unit = o->unit;
-                kd->step = 1;
-                copy_str(kd->fmt, sizeof kd->fmt, "%.0f");
+                /* enum: the fader walks the constants and shows their names */
+                int at = enum_table(f, o, (long long)cur, cmd);
+                if (at >= 0 && cmd->nenum > 0) {
+                    p->kind = PARAM_ENUM;
+                    p->taper = PARAM_LINEAR;
+                    p->min = 0; p->max = cmd->nenum - 1;
+                    p->neutral = at;
+                    p->nnames = cmd->nenum;
+                    p->coarse = p->fine = p->ultra = 1;   /* one constant per step, whatever the grain */
+                    cur = at;
+                } else {
+                    cmd->nenum = 0;
+                    copy_str(cmd->fmt, sizeof cmd->fmt, "%.0f");
+                    set_grains(p, 1, 1);
+                }
             }
-            r->values[m][md->nknobs] = cur;
+            r->values[c] = cur;
+            md->control[md->nknobs] = c;
             offsets[noffsets++] = o->offset;
             md->nknobs++;
         }
     }
 
-    if (md->nknobs == 0 && md->bypassable) add_control(r, m, -1);
-    for (int k = 0; k < md->nknobs; k++) add_control(r, m, k);
+    if (md->nknobs == 0 && md->bypassable) {
+        int c = add_control(r, m, -1);
+        if (c >= 0) {
+            Param *p = &r->params[c];
+            copy_str(p->group, sizeof p->group, md->label);
+            copy_str(p->key, sizeof p->key, "enable");
+            copy_str(p->label, sizeof p->label, "enable");
+            p->kind = PARAM_SWITCH;
+            p->min = 0; p->max = 1;
+            p->neutral = md->enabled_default;
+            r->values[c] = md->enabled_default;
+            md->bypass_control = c;
+        }
+    }
+}
+
+/* Point the parameter set and the enum name tables at this Rack's own
+ * storage. Needed after every struct copy. */
+static void relink(Rack *r)
+{
+    for (int c = 0; c < r->ncontrols; c++)
+        r->params[c].names = r->cmds[c].nenum ? r->cmds[c].enum_names : NULL;
+    r->set.defs = r->params;
+    r->set.values = r->values;
+    r->set.n = r->ncontrols;
+    if (r->set.sel < 0 || r->set.sel >= r->ncontrols) r->set.sel = 0;
+}
+
+void rack_adopt(Rack *dst, const Rack *src)
+{
+    if (dst != src) *dst = *src;
+    relink(dst);
 }
 
 int rack_from_chain(Rack *r, const char *chain, int cap_w, int cap_h, char *err, size_t err_cap)
@@ -392,8 +491,10 @@ int rack_from_chain(Rack *r, const char *chain, int cap_w, int cap_h, char *err,
     for (int i = 0; i < g.ntaps; i++) copy_str(tmp.tap_names[i], sizeof tmp.tap_names[i], g.tap_names[i]);
     graph_free(&g);
 
-    tmp.sel = 0;
-    *r = tmp;
+    param_finish_all(tmp.params, tmp.ncontrols);
+    tmp.set.sel = 0;
+    tmp.rng_state = r->rng_state;   /* a re-derived rack keeps rolling the same dice */
+    rack_adopt(r, &tmp);
     return 0;
 }
 
@@ -404,209 +505,247 @@ int rack_find_module(const Rack *r, const char *label)
     return -1;
 }
 
-int rack_find_knob(const Rack *r, int m, const char *opt)
+int rack_find_control(const Rack *r, int m, const char *opt)
 {
     if (m < 0 || m >= r->nmods) return -1;
-    for (int k = 0; k < r->mods[m].nknobs; k++)
-        if (!strcmp(r->mods[m].knobs[k].opt, opt) || !strcmp(r->mods[m].knobs[k].label, opt)) return k;
+    const ModuleDef *md = &r->mods[m];
+    for (int k = 0; k < md->nknobs; k++) {
+        int c = md->control[k];
+        if (!strcmp(r->cmds[c].opt, opt) || !strcmp(r->params[c].label, opt)) return c;
+    }
     return -1;
+}
+
+/* ---------- raw values ---------- */
+
+double rack_get_raw(const Rack *r, int c)
+{
+    if (c < 0 || c >= r->ncontrols) return 0;
+    const KnobCmd *cmd = &r->cmds[c];
+    if (cmd->nenum) {
+        int i = (int)floor(r->values[c] + 0.5);
+        if (i < 0) i = 0;
+        if (i >= cmd->nenum) i = cmd->nenum - 1;
+        return (double)cmd->enum_vals[i];
+    }
+    return r->values[c];
+}
+
+void rack_set_raw(Rack *r, int c, double raw)
+{
+    if (c < 0 || c >= r->ncontrols) return;
+    const KnobCmd *cmd = &r->cmds[c];
+    if (cmd->nenum) {
+        long long v = (long long)floor(raw + 0.5);
+        for (int i = 0; i < cmd->nenum; i++)
+            if (cmd->enum_vals[i] == v) { r->values[c] = i; return; }
+        return;   /* not one of the constants: leave the value alone */
+    }
+    r->values[c] = param_clamp(&r->params[c], raw);
 }
 
 /* ---------- commands ---------- */
 
-static void format_value(const char *fmt, double v, char *buf, size_t cap)
+static void format_raw(const Rack *r, int c, char *buf, size_t cap)
 {
-    snprintf(buf, cap, fmt && *fmt ? fmt : "%g", v);
+    const KnobCmd *cmd = &r->cmds[c];
+    if (cmd->nenum) snprintf(buf, cap, "%lld", (long long)rack_get_raw(r, c));
+    else snprintf(buf, cap, cmd->fmt[0] ? cmd->fmt : "%g", r->values[c]);
 }
 
-void rack_send_knob(const Rack *r, Voice *v, int m, int k)
+void rack_send_control(const Rack *r, Voice *v, int c)
 {
-    const ModuleDef *md = &r->mods[m];
-    const KnobDef *kd = &md->knobs[k];
+    if (!v || c < 0 || c >= r->ncontrols) return;   /* no voice yet: values only */
+    Control ct = r->controls[c];
+    if (ct.knob < 0) { rack_send_enable(r, v, ct.module); return; }
+    const ModuleDef *md = &r->mods[ct.module];
+    const KnobCmd *cmd = &r->cmds[c];
     char val[64];
-    format_value(kd->fmt, r->values[m][k], val, sizeof val);
-    voice_send_command(v, md->name, kd->opt, val);
-    if (kd->opt2[0]) {
-        format_value(kd->fmt2, r->values[m][k], val, sizeof val);
-        voice_send_command(v, md->name, kd->opt2, val);
+    format_raw(r, c, val, sizeof val);
+    voice_send_command(v, md->name, cmd->opt, val);
+    if (cmd->opt2[0]) {
+        snprintf(val, sizeof val, cmd->fmt2[0] ? cmd->fmt2 : "%g", r->values[c]);
+        voice_send_command(v, md->name, cmd->opt2, val);
     }
 }
 
 void rack_send_enable(const Rack *r, Voice *v, int m)
 {
     const ModuleDef *md = &r->mods[m];
-    if (!md->bypassable) return;
+    if (!v || !md->bypassable) return;
     voice_send_command(v, md->name, "enable", r->enabled[m] ? "1" : "0");
 }
 
 void rack_send_all(const Rack *r, Voice *v)
 {
-    for (int m = 0; m < r->nmods; m++) {
-        for (int k = 0; k < r->mods[m].nknobs; k++)
-            rack_send_knob(r, v, m, k);
+    for (int c = 0; c < r->ncontrols; c++)
+        if (r->controls[c].knob >= 0) rack_send_control(r, v, c);
+    for (int m = 0; m < r->nmods; m++)
         rack_send_enable(r, v, m);
-    }
 }
 
 /* ---------- editing ---------- */
 
-void rack_select_next(Rack *r, int dir)
+/* The bypass switch, where a module has one, mirrors enabled[]. */
+static void sync_switch(Rack *r, int m)
 {
-    if (r->ncontrols == 0) return;
-    r->sel = (r->sel + dir + r->ncontrols) % r->ncontrols;
+    int c = r->mods[m].bypass_control;
+    if (c >= 0) r->values[c] = r->enabled[m] ? 1 : 0;
 }
 
-static double clampd(double x, double lo, double hi)
+void rack_set_enabled(Rack *r, Voice *v, int m, int on)
 {
-    return x < lo ? lo : x > hi ? hi : x;
-}
-
-void rack_nudge(Rack *r, Voice *v, int dir, double factor)
-{
-    if (r->ncontrols == 0) return;
-    Control c = r->controls[r->sel];
-    if (c.knob < 0) {
-        rack_toggle_selected(r, v);
-        return;
-    }
-    const KnobDef *kd = &r->mods[c.module].knobs[c.knob];
-    double *val = &r->values[c.module][c.knob];
-    *val = clampd(*val + dir * kd->step * factor, kd->min, kd->max);
-    /* kill float dust so "%g" prints cleanly */
-    *val = round(*val * 1e6) / 1e6;
-    rack_send_knob(r, v, c.module, c.knob);
-}
-
-void rack_toggle_selected(Rack *r, Voice *v)
-{
-    if (r->ncontrols == 0) return;
-    Control c = r->controls[r->sel];
-    if (!r->mods[c.module].bypassable) return;
-    r->enabled[c.module] = !r->enabled[c.module];
-    rack_send_enable(r, v, c.module);
-}
-
-void rack_reset_selected(Rack *r, Voice *v)
-{
-    if (r->ncontrols == 0) return;
-    Control c = r->controls[r->sel];
-    if (c.knob < 0) {
-        r->enabled[c.module] = r->mods[c.module].enabled_default;
-        rack_send_enable(r, v, c.module);
-        return;
-    }
-    r->values[c.module][c.knob] = r->mods[c.module].knobs[c.knob].neutral;
-    rack_send_knob(r, v, c.module, c.knob);
-}
-
-void rack_reset_all(Rack *r, Voice *v)
-{
-    for (int m = 0; m < r->nmods; m++) {
-        r->enabled[m] = r->mods[m].enabled_default;
-        for (int k = 0; k < r->mods[m].nknobs; k++)
-            r->values[m][k] = r->mods[m].knobs[k].neutral;
-    }
-    rack_send_all(r, v);
-}
-
-void rack_format_value(const Rack *r, int m, int k, char *buf, size_t cap)
-{
-    const KnobDef *kd = &r->mods[m].knobs[k];
-    double v = r->values[m][k];
-    if (kd->cls && kd->unit) {
-        const AVClass *cls = kd->cls;
-        const AVOption *c = NULL;
-        long long iv = (long long)v;
-        while ((c = av_opt_next(&cls, c)))
-            if (c->type == AV_OPT_TYPE_CONST && c->unit && !strcmp(c->unit, kd->unit) && c->default_val.i64 == iv) {
-                snprintf(buf, cap, "%s", c->name);
-                return;
-            }
-    }
-    snprintf(buf, cap, "%g", v);
-}
-
-void rack_describe_selected(const Rack *r, char *buf, size_t cap)
-{
-    if (r->ncontrols == 0) { snprintf(buf, cap, "no controls"); return; }
-    Control c = r->controls[r->sel];
-    const ModuleDef *md = &r->mods[c.module];
-    const char *state = md->bypassable ? (r->enabled[c.module] ? "on" : "OFF") : "fixed";
-    if (c.knob < 0) {
-        snprintf(buf, cap, "[%d/%d] %s  [%s]", r->sel + 1, r->ncontrols, md->label, state);
-    } else {
-        const KnobDef *kd = &md->knobs[c.knob];
-        char val[48];
-        rack_format_value(r, c.module, c.knob, val, sizeof val);
-        snprintf(buf, cap, "[%d/%d] %s.%s = %s  [%s]", r->sel + 1, r->ncontrols,
-                 md->label, kd->label, val, state);
-    }
-}
-
-static double snap(const KnobDef *kd, double val)
-{
-    if (kd->step > 0)
-        val = kd->neutral + round((val - kd->neutral) / kd->step) * kd->step;
-    val = clampd(val, kd->min, kd->max);
-    return round(val * 1e6) / 1e6;
-}
-
-void rack_set_control(Rack *r, Voice *v, int control, double value)
-{
-    if (control < 0 || control >= r->ncontrols) return;
-    Control c = r->controls[control];
-    if (c.knob < 0) {
-        r->enabled[c.module] = value >= 0.5;
-        rack_send_enable(r, v, c.module);
-        return;
-    }
-    const KnobDef *kd = &r->mods[c.module].knobs[c.knob];
-    r->values[c.module][c.knob] = snap(kd, value);
-    rack_send_knob(r, v, c.module, c.knob);
+    if (m < 0 || m >= r->nmods || !r->mods[m].bypassable) return;
+    r->enabled[m] = on ? 1 : 0;
+    sync_switch(r, m);
+    rack_send_enable(r, v, m);
 }
 
 void rack_toggle_module(Rack *r, Voice *v, int m)
 {
     if (m < 0 || m >= r->nmods || !r->mods[m].bypassable) return;
-    r->enabled[m] = !r->enabled[m];
-    rack_send_enable(r, v, m);
+    rack_set_enabled(r, v, m, !r->enabled[m]);
+}
+
+void rack_select_next(Rack *r, int dir)
+{
+    paramset_select(&r->set, dir);
+}
+
+/* Kill float dust so "%g" prints cleanly. */
+static double tidy(double x) { return round(x * 1e6) / 1e6; }
+
+void rack_nudge(Rack *r, Voice *v, int dir, ParamGrain g)
+{
+    if (r->ncontrols == 0) return;
+    int c = r->set.sel;
+    if (r->controls[c].knob < 0) {
+        rack_toggle_selected(r, v);
+        return;
+    }
+    if (r->params[c].kind == PARAM_ENUM) {
+        /* An enum steps one constant at a time and wraps. */
+        int n = r->cmds[c].nenum;
+        int i = (int)floor(r->values[c] + 0.5) + dir;
+        r->values[c] = n > 0 ? (i % n + n) % n : 0;
+    } else {
+        paramset_nudge(&r->set, c, dir, g);
+        r->values[c] = tidy(r->values[c]);
+    }
+    rack_send_control(r, v, c);
+}
+
+void rack_toggle_selected(Rack *r, Voice *v)
+{
+    if (r->ncontrols == 0) return;
+    rack_toggle_module(r, v, r->controls[r->set.sel].module);
+}
+
+void rack_reset_control(Rack *r, Voice *v, int c)
+{
+    if (c < 0 || c >= r->ncontrols) return;
+    Control ct = r->controls[c];
+    if (ct.knob < 0) {
+        rack_set_enabled(r, v, ct.module, r->mods[ct.module].enabled_default);
+        return;
+    }
+    paramset_reset(&r->set, c);
+    rack_send_control(r, v, c);
+}
+
+void rack_reset_selected(Rack *r, Voice *v)
+{
+    if (r->ncontrols == 0) return;
+    rack_reset_control(r, v, r->set.sel);
+}
+
+void rack_neutral(Rack *r)
+{
+    paramset_reset_all(&r->set);
+    for (int m = 0; m < r->nmods; m++) {
+        r->enabled[m] = r->mods[m].enabled_default;
+        sync_switch(r, m);
+    }
+}
+
+void rack_reset_all(Rack *r, Voice *v)
+{
+    rack_neutral(r);
+    rack_send_all(r, v);
+}
+
+void rack_format_value(const Rack *r, int c, char *buf, size_t cap)
+{
+    if (c < 0 || c >= r->ncontrols) { snprintf(buf, cap, "-"); return; }
+    param_format(&r->params[c], r->values[c], buf, cap);
+}
+
+void rack_describe_selected(const Rack *r, char *buf, size_t cap)
+{
+    if (r->ncontrols == 0) { snprintf(buf, cap, "no controls"); return; }
+    int c = r->set.sel;
+    Control ct = r->controls[c];
+    const ModuleDef *md = &r->mods[ct.module];
+    const char *state = md->bypassable ? (r->enabled[ct.module] ? "on" : "OFF") : "fixed";
+    if (ct.knob < 0) {
+        snprintf(buf, cap, "[%d/%d] %s  [%s]", c + 1, r->ncontrols, md->label, state);
+    } else {
+        char val[48];
+        rack_format_value(r, c, val, sizeof val);
+        snprintf(buf, cap, "[%d/%d] %s.%s = %s  [%s]", c + 1, r->ncontrols,
+                 r->params[c].group, r->params[c].key, val, state);
+    }
+}
+
+void rack_set_control(Rack *r, Voice *v, int c, double value)
+{
+    if (c < 0 || c >= r->ncontrols) return;
+    Control ct = r->controls[c];
+    if (ct.knob < 0) {
+        rack_set_enabled(r, v, ct.module, value >= 0.5);
+        return;
+    }
+    paramset_set(&r->set, c, value);
+    r->values[c] = tidy(r->values[c]);
+    rack_send_control(r, v, c);
 }
 
 /* xorshift32; seeded from the clock on first use. Quality is irrelevant here. */
-static unsigned rng_state;
-
-static double rnd(void)   /* [0,1) */
+static double rnd(Rack *r)   /* [0,1) */
 {
-    if (!rng_state) {
-        rng_state = (unsigned)time(NULL) ^ ((unsigned)clock() << 8) ^ 0x9e3779b9u;
-        if (!rng_state) rng_state = 1;
+    if (!r->rng_state) {
+        r->rng_state = (unsigned)time(NULL) ^ ((unsigned)clock() << 8) ^ 0x9e3779b9u;
+        if (!r->rng_state) r->rng_state = 1;
     }
-    unsigned x = rng_state;
+    unsigned x = r->rng_state;
     x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-    rng_state = x;
+    r->rng_state = x;
     return (x >> 8) / 16777216.0;
 }
 
 void rack_randomize(Rack *r, Voice *v, double depth)
 {
-    depth = clampd(depth, 0, 1);
+    if (depth < 0) depth = 0;
+    if (depth > 1) depth = 1;
     for (int m = 0; m < r->nmods; m++) {
         const ModuleDef *md = &r->mods[m];
         if (md->bypassable) {
             if (md->enabled_default)
-                r->enabled[m] = rnd() < 0.92;
+                r->enabled[m] = rnd(r) < 0.92;
             else
-                r->enabled[m] = rnd() < 0.15 + 0.35 * depth;
+                r->enabled[m] = rnd(r) < 0.15 + 0.35 * depth;
+            sync_switch(r, m);
         }
         for (int k = 0; k < md->nknobs; k++) {
-            const KnobDef *kd = &md->knobs[k];
-            double val = kd->neutral;
-            if (rnd() < 0.65) {
-                double u = rnd() * 2 - 1;                 /* [-1,1] */
-                double side = u < 0 ? kd->neutral - kd->min : kd->max - kd->neutral;
-                val = kd->neutral + (u < 0 ? -1 : 1) * u * u * side * depth;
+            int c = md->control[k];
+            const Param *p = &r->params[c];
+            double val = p->neutral;
+            if (rnd(r) < 0.65) {
+                double u = rnd(r) * 2 - 1;                 /* [-1,1] */
+                double side = u < 0 ? p->neutral - p->min : p->max - p->neutral;
+                val = p->neutral + (u < 0 ? -1 : 1) * u * u * side * depth;
             }
-            r->values[m][k] = snap(kd, val);
+            r->values[c] = tidy(param_snap(p, val, PARAM_FINE));
         }
     }
     rack_send_all(r, v);

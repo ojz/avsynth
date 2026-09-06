@@ -6,6 +6,8 @@
 #include <string.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include "ui.h"
+
 #define FIRST_GLYPH 32
 #define LAST_GLYPH  126
 #define NGLYPH (LAST_GLYPH - FIRST_GLYPH + 1)
@@ -13,19 +15,23 @@
 #define SHEET_MAX_W 820
 #define PAD 6
 
-const SDL_Color HUD_TEXT = { 235, 235, 235, 255 };
-const SDL_Color HUD_DIM  = { 150, 150, 150, 255 };
-const SDL_Color HUD_OFF  = {  95,  95,  95, 255 };
-const SDL_Color HUD_SEL  = { 255, 150,  30, 255 };
-const SDL_Color HUD_OK   = { 120, 220, 120, 255 };
-const SDL_Color HUD_ERR  = { 255,  90,  90, 255 };
+/* The lab's palette (shared/ui), by value until the shell hands it over. */
+const SDL_Color HUD_TEXT = { 235, 231, 216, 255 };
+const SDL_Color HUD_DIM  = { 156, 159, 150, 255 };
+const SDL_Color HUD_OFF  = { 104, 108, 102, 255 };
+const SDL_Color HUD_SEL  = { 232, 168,  56, 255 };
+const SDL_Color HUD_OK   = { 108, 200, 138, 255 };
+const SDL_Color HUD_ERR  = { 214,  92,  78, 255 };
 
 typedef struct Glyph { SDL_Rect src; int advance; } Glyph;
 
+/* One control on the panel: the module name column the HUD draws itself,
+ * then a shared fader (or a switch) laid out as a row over the rest. */
 typedef struct Row {
-    SDL_Rect rect;     /* whole row */
-    SDL_Rect name;     /* module name column, click toggles bypass */
-    SDL_Rect bar;      /* value bar, drag sets */
+    SDL_FRect rect;     /* whole row */
+    SDL_FRect name;     /* module name column, click toggles bypass */
+    SDL_FRect cell;     /* what the fader or switch occupies */
+    UiFader   fader;    /* laid out when the control is a fader */
     int control;
 } Row;
 
@@ -167,6 +173,20 @@ static void textf(Hud *h, int x, int y, SDL_Color col, const char *fmt, ...)
 
 int  hud_line_h(const Hud *h) { return h->line_h; }
 int  hud_char_w(const Hud *h) { return h->char_w; }
+
+/* The glyph atlas as shared/ui sees it. */
+static void atlas_draw(void *ud, float x, float y, const char *s, SDL_Color c)
+{
+    hud_text(ud, (int)x, (int)y, c, s);
+}
+static float atlas_width(void *ud, const char *s) { return (float)hud_text_width(ud, s); }
+static float atlas_height(void *ud) { return (float)((const Hud *)ud)->line_h; }
+
+static UiText ui_text_for(Hud *h)
+{
+    UiText t = { atlas_draw, atlas_width, atlas_height, h };
+    return t;
+}
 
 void hud_fill(SDL_Renderer *ren, SDL_Rect r, Uint8 R, Uint8 G, Uint8 B, Uint8 A)
 {
@@ -349,25 +369,35 @@ static void draw_taps(Hud *h, SDL_Renderer *ren, int W, int H, int in_sheet)
     }
 }
 
+/* Row geometry, once. A row is one line of text plus room for the fader's
+ * handle to overhang its track. */
+#define ROW_H(h)      ((h)->line_h + 8)
+#define NAME_W(h)     ((h)->char_w * 8 + 4)
+#define LABEL_W(h)    ((float)((h)->char_w * 13 + 4))
+#define VALUE_W(h)    ((float)((h)->char_w * 11))
+
 static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
 {
     const Rack *r = h->rack;
     SDL_Rect body = hud_sheet(h, ren, W, H);
+    UiText t = ui_text_for(h);
+    const UiTheme *th = ui_theme();
 
-    const int rowh = h->line_h + 2;
-    const int name_w  = h->char_w * 8 + 4;
-    const int label_w = h->char_w * 13 + 4;
-    int bar_w = body.w - name_w - label_w - h->char_w * 12;
-    if (bar_w > 220) bar_w = 220;
-    if (bar_w < 60) bar_w = 60;
+    const int rowh = ROW_H(h);
+    const int name_w = NAME_W(h);
+    /* Rows stop growing past a comfortable width so a wide window does not
+     * turn every fader into a metre of track. */
+    int row_w = body.w;
+    if (row_w > name_w + 520) row_w = name_w + 520;
 
     int max_rows = body.h / rowh;
     if (max_rows < 1) max_rows = 1;
     int shown = r->ncontrols < max_rows ? r->ncontrols : max_rows;
+    int sel = r->set.sel;
 
     /* keep the selection in view */
-    if (r->sel < h->scroll) h->scroll = r->sel;
-    if (r->sel >= h->scroll + shown) h->scroll = r->sel - shown + 1;
+    if (sel < h->scroll) h->scroll = sel;
+    if (sel >= h->scroll + shown) h->scroll = sel - shown + 1;
     if (h->scroll > r->ncontrols - shown) h->scroll = r->ncontrols - shown;
     if (h->scroll < 0) h->scroll = 0;
 
@@ -377,50 +407,42 @@ static void draw_panel(Hud *h, SDL_Renderer *ren, int W, int H)
     for (int i = h->scroll; i < h->scroll + shown && i < r->ncontrols; i++) {
         Control c = r->controls[i];
         const ModuleDef *md = &r->mods[c.module];
+        const Param *p = &r->params[i];
         int on = md->bypassable ? r->enabled[c.module] : 1;
-        int selected = (i == r->sel);
+        int selected = (i == sel);
 
         Row *row = &h->rows[h->nrows++];
         row->control = i;
-        row->rect = (SDL_Rect){ body.x, y, body.w, rowh };
-        row->name = (SDL_Rect){ x, y, name_w, rowh };
-        row->bar  = (SDL_Rect){ x + name_w + label_w, y + 3, bar_w, rowh - 6 };
+        row->rect = (SDL_FRect){ (float)body.x, (float)y, (float)row_w, (float)rowh };
+        row->name = (SDL_FRect){ (float)x, (float)y, (float)name_w, (float)rowh };
+        row->cell = (SDL_FRect){ (float)(x + name_w), (float)y, (float)(row_w - name_w), (float)rowh };
 
-        if (selected) hud_fill(ren, row->rect, HUD_SEL.r, HUD_SEL.g, HUD_SEL.b, 70);
+        /* The module name is the HUD's own column: it is not a control, it
+         * is where a click bypasses the module. */
+        textf(h, x, y + 4, on ? HUD_DIM : HUD_OFF, "%.8s", md->label);
 
-        SDL_Color tc = on ? (selected ? HUD_SEL : HUD_TEXT) : HUD_OFF;
-        SDL_Color nc = on ? HUD_DIM : HUD_OFF;
-
-        textf(h, x, y + 1, nc, "%.8s", md->label);
-
-        if (c.knob < 0) {
-            hud_text(h, x + name_w, y + 1, tc, on ? "[x] on" : "[ ] off");
+        if (p->kind == PARAM_FADER || p->kind == PARAM_ENUM) {
+            ui_fader_layout_row(&row->fader, row->cell, LABEL_W(h), VALUE_W(h), &t);
+            if (p->kind == PARAM_FADER)
+                ui_fader_draw(ren, &t, &row->fader, p, r->values[i], selected);
+            else
+                ui_stepper_draw_row(ren, &t, row->cell, LABEL_W(h), VALUE_W(h), p, r->values[i], selected);
         } else {
-            const KnobDef *kd = &md->knobs[c.knob];
-            textf(h, x + name_w, y + 1, tc, "%.13s", kd->label);
+            ui_stepper_draw_row(ren, &t, row->cell, LABEL_W(h), VALUE_W(h), p, r->values[i], selected);
+        }
 
-            /* bar: track, fill from neutral to value, marker at value */
-            double v = r->values[c.module][c.knob];
-            double span = kd->max - kd->min;
-            double tv = span > 0 ? (v - kd->min) / span : 0;
-            double tn = span > 0 ? (kd->neutral - kd->min) / span : 0;
-            hud_fill(ren, row->bar, 255, 255, 255, on ? 30 : 15);
-            int xv = row->bar.x + (int)(tv * (row->bar.w - 1));
-            int xn = row->bar.x + (int)(tn * (row->bar.w - 1));
-            SDL_Rect f = { xn < xv ? xn : xv, row->bar.y, abs(xv - xn) + 1, row->bar.h };
-            hud_fill(ren, f, tc.r, tc.g, tc.b, on ? 110 : 50);
-            hud_fill(ren, (SDL_Rect){ xv - 1, row->bar.y - 1, 3, row->bar.h + 2 }, tc.r, tc.g, tc.b, 255);
-
-            char val[48];
-            rack_format_value(r, c.module, c.knob, val, sizeof val);
-            hud_text(h, row->bar.x + row->bar.w + 8, y + 1, tc, val);
+        /* A bypassed module's controls still show their values but sit
+         * behind a wash, so the eye skips them the way the picture does. */
+        if (!on) {
+            SDL_Color wash = { th->bg.r, th->bg.g, th->bg.b, 150 };
+            ui_fill(ren, row->cell, wash);
         }
         y += rowh;
     }
 
     char right[32] = "";
-    if (r->ncontrols > shown) snprintf(right, sizeof right, "%d/%d", r->sel + 1, r->ncontrols);
-    hud_footer(h, &body, "tab/arrows knob  space bypass  bksp reset  r reset all  x random  1-0 preset  shift+1-0 save", right);
+    if (r->ncontrols > shown) snprintf(right, sizeof right, "%d/%d", sel + 1, r->ncontrols);
+    hud_footer(h, &body, "tab/arrows fader  ctrl coarse  shift ultra  space bypass  bksp reset  r reset all  x random  1-0 preset  shift+1-0 save", right);
 }
 
 void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
@@ -447,29 +469,29 @@ void hud_draw(Hud *h, SDL_Renderer *ren, int W, int H)
 
 /* ---------- mouse ---------- */
 
-static int in_rect(int x, int y, const SDL_Rect *r)
-{
-    return x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
-}
-
-static const Row *row_at(const Hud *h, int x, int y)
+static const Row *row_at(const Hud *h, float x, float y)
 {
     for (int i = 0; i < h->nrows; i++)
-        if (in_rect(x, y, &h->rows[i].rect)) return &h->rows[i];
+        if (ui_hit(&h->rows[i].rect, x, y)) return &h->rows[i];
     return NULL;
 }
 
-static void set_from_bar(Rack *rack, Voice *voice, const Row *row, int mx)
+static const Row *row_for_control(const Hud *h, int control)
 {
-    Control c = rack->controls[row->control];
-    if (c.knob < 0) return;
-    const KnobDef *kd = &rack->mods[c.module].knobs[c.knob];
-    double t = (double)(mx - row->bar.x) / (row->bar.w - 1);
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
-    rack_set_control(rack, voice, row->control, kd->min + t * (kd->max - kd->min));
+    for (int i = 0; i < h->nrows; i++)
+        if (h->rows[i].control == control) return &h->rows[i];
+    return NULL;
 }
 
+static int in_panel(const Hud *h, float x, float y)
+{
+    SDL_FRect p = hud_frect(h->panel);
+    return ui_hit(&p, x, y);
+}
+
+/* The fader gestures come from shared/ui (ROADMAP section 6): drag is
+ * absolute, the wheel nudges by grain, middle or double click resets. What
+ * is vsynth's own here is the module name column, which bypasses. */
 int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
 {
     if (h->mode != MODE_PANEL) return 0;
@@ -484,48 +506,53 @@ int hud_handle_event(Hud *h, const SDL_Event *ev, Rack *rack, Voice *voice)
 
     switch (ev->type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-        int mx = (int)ev->button.x, my = (int)ev->button.y;
-        if (!in_rect(mx, my, &h->panel)) return 0;
-        if (ev->button.button != SDL_BUTTON_LEFT) return 0;   /* right-drag resizes, even over the panel */
+        float mx = ev->button.x, my = ev->button.y;
+        if (!in_panel(h, mx, my)) return 0;
+        if (ev->button.button == SDL_BUTTON_RIGHT) return 0;   /* right-drag resizes, even over the panel */
         const Row *row = row_at(h, mx, my);
-        if (!row) return 1;
+        if (!row) return ev->button.button == SDL_BUTTON_LEFT;
         Control c = rack->controls[row->control];
-        rack->sel = row->control;
-        if (in_rect(mx, my, &row->name) || c.knob < 0) {
-            rack_toggle_module(rack, voice, c.module);
-        } else if (mx >= row->bar.x - 4 && mx < row->bar.x + row->bar.w + 4) {
+        rack->set.sel = row->control;
+        if (ui_hit(&row->name, mx, my)) {
+            if (ev->button.button == SDL_BUTTON_LEFT) rack_toggle_module(rack, voice, c.module);
+            return 1;
+        }
+        if (ui_is_reset_click(ev)) { rack_reset_control(rack, voice, row->control); h->drag_control = -1; return 1; }
+        if (ev->button.button != SDL_BUTTON_LEFT) return 1;
+        const Param *p = &rack->params[row->control];
+        if (p->kind == PARAM_FADER) {
             h->drag_control = row->control;
-            set_from_bar(rack, voice, row, mx);
+            rack_set_control(rack, voice, row->control,
+                             ui_fader_value_at(&row->fader, p, mx, my));
+        } else if (c.knob < 0) {
+            rack_toggle_module(rack, voice, c.module);
+        } else {
+            rack_nudge(rack, voice, +1, PARAM_FINE);   /* an enum steps on click */
         }
         return 1;
     }
-    case SDL_EVENT_MOUSE_MOTION:
-        if (h->drag_control < 0) return in_rect((int)ev->motion.x, (int)ev->motion.y, &h->panel);
-        for (int i = 0; i < h->nrows; i++)
-            if (h->rows[i].control == h->drag_control) {
-                set_from_bar(rack, voice, &h->rows[i], (int)ev->motion.x);
-                break;
-            }
+    case SDL_EVENT_MOUSE_MOTION: {
+        if (h->drag_control < 0) return in_panel(h, ev->motion.x, ev->motion.y);
+        const Row *row = row_for_control(h, h->drag_control);
+        if (row) rack_set_control(rack, voice, h->drag_control,
+                                  ui_fader_value_at(&row->fader, &rack->params[h->drag_control],
+                                                    ev->motion.x, ev->motion.y));
         return 1;
+    }
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (h->drag_control >= 0) { h->drag_control = -1; return 1; }
-        return ev->button.button == SDL_BUTTON_LEFT &&
-               in_rect((int)ev->button.x, (int)ev->button.y, &h->panel);
+        return ev->button.button == SDL_BUTTON_LEFT && in_panel(h, ev->button.x, ev->button.y);
     case SDL_EVENT_MOUSE_WHEEL: {
         /* The wheel event carries no usable position, so ask for the pointer.
          * That answer is in window coordinates and needs the same conversion. */
-        float wx, wy, fmx, fmy;
+        float wx, wy, mx, my;
         SDL_GetMouseState(&wx, &wy);
-        SDL_RenderCoordinatesFromWindow(h->ren, wx, wy, &fmx, &fmy);
-        int mx = (int)fmx, my = (int)fmy;
+        SDL_RenderCoordinatesFromWindow(h->ren, wx, wy, &mx, &my);
         const Row *row = row_at(h, mx, my);
-        if (!row) return in_rect(mx, my, &h->panel);
-        rack->sel = row->control;
+        if (!row) return in_panel(h, mx, my);
+        rack->set.sel = row->control;
         int dir = ev->wheel.y > 0 ? 1 : ev->wheel.y < 0 ? -1 : 0;
-        if (dir) {
-            SDL_Keymod mod = SDL_GetModState();
-            rack_nudge(rack, voice, dir, (mod & SDL_KMOD_SHIFT) ? 0.1 : (mod & SDL_KMOD_CTRL) ? 10.0 : 1.0);
-        }
+        if (dir) rack_nudge(rack, voice, dir, ui_grain(SDL_GetModState()));
         return 1;
     }
     default:

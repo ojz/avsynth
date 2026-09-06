@@ -52,9 +52,20 @@ void ui_fader_layout(UiFader *f, SDL_FRect box, UiOrient o, const UiText *t);
 void ui_fader_draw(SDL_Renderer *r, const UiText *t, const UiFader *f,
                    const Param *p, double value, int selected);
 
+/* The fader as one line, for an app whose controls are a list rather than a
+ * panel: label on the left in label_w, readout right-aligned in value_w, the
+ * track between them. Drawn by ui_fader_draw and driven by the same gestures;
+ * only the arrangement differs. */
+void ui_fader_layout_row(UiFader *f, SDL_FRect box, float label_w, float value_w,
+                         const UiText *t);
+
 /* A switch or enum stepper, drawn to the same rhythm as a fader. */
 void ui_stepper_draw(SDL_Renderer *r, const UiText *t, SDL_FRect box,
                      const Param *p, double value, int selected);
+/* The same stepper on one line, to sit in a list next to row faders. */
+void ui_stepper_draw_row(SDL_Renderer *r, const UiText *t, SDL_FRect box,
+                         float label_w, float value_w,
+                         const Param *p, double value, int selected);
 
 /*
  * The gesture table, in one place (ROADMAP section 6):

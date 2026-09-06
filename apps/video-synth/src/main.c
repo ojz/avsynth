@@ -40,6 +40,7 @@
 #include "editor.h"
 #include "help.h"
 #include "options.h"
+#include "ui.h"
 
 typedef struct App {
     VoiceConfig cfg;
@@ -169,54 +170,44 @@ static int restart_voice(App *a)
 
 static void set_knob(Rack *r, const char *mod, const char *opt, double v)
 {
-    int m = rack_find_module(r, mod), k = rack_find_knob(r, m, opt);
-    if (m >= 0 && k >= 0) r->values[m][k] = v;
+    int c = rack_find_control(r, rack_find_module(r, mod), opt);
+    if (c >= 0) rack_set_raw(r, c, v);
 }
 
 static void set_on(Rack *r, const char *mod, int on)
 {
-    int m = rack_find_module(r, mod);
-    if (m >= 0) r->enabled[m] = on;
-}
-
-static void neutral(Rack *r)
-{
-    for (int m = 0; m < r->nmods; m++) {
-        r->enabled[m] = r->mods[m].enabled_default;
-        for (int k = 0; k < r->mods[m].nknobs; k++)
-            r->values[m][k] = r->mods[m].knobs[k].neutral;
-    }
+    rack_set_enabled(r, NULL, rack_find_module(r, mod), on);
 }
 
 /* Presets for the "rack" chain, ported from the feedback.ps1 presets. */
 static void seed_rack_presets(Project *proj, int chain_id, Rack *r)
 {
-    neutral(r);
+    rack_neutral(r);
     project_save_preset(proj, chain_id, 1, "init", r);
 
-    neutral(r); set_knob(r, "rot", "angle", 0.026);
+    rack_neutral(r); set_knob(r, "rot", "angle", 0.026);
     project_save_preset(proj, chain_id, 2, "spin", r);
 
-    neutral(r); set_knob(r, "zoom", "w", 1.02); set_knob(r, "rot", "angle", 0.014); set_knob(r, "hue", "s", 1.15);
+    rack_neutral(r); set_knob(r, "zoom", "w", 1.02); set_knob(r, "rot", "angle", 0.014); set_knob(r, "hue", "s", 1.15);
     project_save_preset(proj, chain_id, 3, "tunnel", r);
 
-    neutral(r); set_knob(r, "trail", "decay", 0.94);
+    rack_neutral(r); set_knob(r, "trail", "decay", 0.94);
     project_save_preset(proj, chain_id, 4, "trail", r);
 
-    neutral(r); set_on(r, "neg", 1);
+    rack_neutral(r); set_on(r, "neg", 1);
     project_save_preset(proj, chain_id, 5, "invert", r);
 
-    neutral(r); set_on(r, "edge", 1);
+    rack_neutral(r); set_on(r, "edge", 1);
     project_save_preset(proj, chain_id, 6, "edge", r);
 
-    neutral(r); set_knob(r, "shift", "rh", 4); set_knob(r, "shift", "bh", -4); set_knob(r, "zoom", "w", 0.98);
+    rack_neutral(r); set_knob(r, "shift", "rh", 4); set_knob(r, "shift", "bh", -4); set_knob(r, "zoom", "w", 0.98);
     project_save_preset(proj, chain_id, 7, "chroma", r);
 
-    neutral(r); set_knob(r, "trail", "decay", 0.9); set_on(r, "blur", 1); set_knob(r, "blur", "sigma", 1.5);
+    rack_neutral(r); set_knob(r, "trail", "decay", 0.9); set_on(r, "blur", 1); set_knob(r, "blur", "sigma", 1.5);
     set_knob(r, "zoom", "w", 1.03);
     project_save_preset(proj, chain_id, 8, "melt", r);
 
-    neutral(r);
+    rack_neutral(r);
 }
 
 static const char CHAIN_MIRROR[] =
@@ -268,7 +259,7 @@ static int switch_chain(App *a, int id)
         editor_set_status(a->ed, err, 1);
         return -1;
     }
-    a->rack = r;
+    rack_adopt(&a->rack, &r);
     a->chain_id = id;
     snprintf(a->chain_name, sizeof a->chain_name, "%s", name);
     snprintf(a->chain_text, sizeof a->chain_text, "%s", text);
@@ -336,7 +327,7 @@ static void apply_editor(App *a)
         fprintf(stderr, "chain error: %s\n", err);
         return;
     }
-    a->rack = r;
+    rack_adopt(&a->rack, &r);
     snprintf(a->chain_text, sizeof a->chain_text, "%s", text);
     project_chain_set_text(a->proj, a->chain_id, text);
     a->preset_slot = 0;
@@ -362,8 +353,8 @@ static void pick_region(App *a)
     if (rack_from_chain(&r, a->rack.chain, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) == 0) {
         memcpy(r.values, a->rack.values, sizeof r.values);
         memcpy(r.enabled, a->rack.enabled, sizeof r.enabled);
-        r.sel = a->rack.sel;
-        a->rack = r;
+        r.set.sel = a->rack.set.sel;
+        rack_adopt(&a->rack, &r);
     }
     restart_voice(a);
     refresh_project_view(a);
@@ -432,28 +423,34 @@ static int selftest(App *a)
     } else {
         fprintf(stderr, "selftest: default chain -> %d modules, %d controls\n", r.nmods, r.ncontrols);
         for (int i = 0; i < r.ncontrols; i++) {
-            Control c = r.controls[i];
-            const ModuleDef *md = &r.mods[c.module];
-            if (c.knob < 0) fprintf(stderr, "  %-8s bypass\n", md->label);
-            else {
-                char val[48];
-                rack_format_value(&r, c.module, c.knob, val, sizeof val);
-                fprintf(stderr, "  %-8s %-12s %s [%g..%g] step %g\n", md->label, md->knobs[c.knob].label,
-                        val, md->knobs[c.knob].min, md->knobs[c.knob].max, md->knobs[c.knob].step);
-            }
+            const Param *p = &r.params[i];
+            char val[48];
+            rack_format_value(&r, i, val, sizeof val);
+            if (r.controls[i].knob < 0) fprintf(stderr, "  %-8s bypass %s\n", p->group, val);
+            else fprintf(stderr, "  %-8s %-12s %s [%g..%g] fine %g coarse %g ultra %g%s\n", p->group, p->key,
+                         val, p->min, p->max, p->fine, p->coarse, p->ultra,
+                         p->taper == PARAM_BIPOLAR ? " bipolar" : "");
         }
         int m = rack_find_module(&r, "zoom");
-        if (m < 0 || rack_find_knob(&r, m, "w") < 0) { fprintf(stderr, "selftest: zoom knob missing FAILED\n"); fails++; }
+        if (m < 0 || rack_find_control(&r, m, "w") < 0) { fprintf(stderr, "selftest: zoom knob missing FAILED\n"); fails++; }
         m = rack_find_module(&r, "rot");
-        if (m < 0 || rack_find_knob(&r, m, "angle") < 0) { fprintf(stderr, "selftest: rot.angle missing FAILED\n"); fails++; }
+        if (m < 0 || rack_find_control(&r, m, "angle") < 0) { fprintf(stderr, "selftest: rot.angle missing FAILED\n"); fails++; }
         m = rack_find_module(&r, "mix");
         if (m < 0 || r.enabled[m] != 0) { fprintf(stderr, "selftest: mix should start bypassed FAILED\n"); fails++; }
         m = rack_find_module(&r, "diff");
-        int k = rack_find_knob(&r, m, "all_mode");
+        int k = rack_find_control(&r, m, "all_mode");
         char val[48] = "";
-        if (m >= 0 && k >= 0) rack_format_value(&r, m, k, val, sizeof val);
+        if (k >= 0) rack_format_value(&r, k, val, sizeof val);
         if (strcmp(val, "difference")) { fprintf(stderr, "selftest: enum name FAILED (got '%s')\n", val); fails++; }
         else fprintf(stderr, "selftest: enum knob shows '%s' OK\n", val);
+        /* the enum's fader value is an index; the command carries the constant */
+        if (k >= 0 && r.params[k].kind != PARAM_ENUM) { fprintf(stderr, "selftest: all_mode is not an enum FAILED\n"); fails++; }
+        /* a fader survives a struct copy: its set and enum names must point into the copy */
+        Rack copy;
+        rack_adopt(&copy, &r);
+        if (copy.set.defs != copy.params || (k >= 0 && copy.params[k].names != copy.cmds[k].enum_names)) {
+            fprintf(stderr, "selftest: rack_adopt relink FAILED\n"); fails++;
+        } else fprintf(stderr, "selftest: rack_adopt relink OK\n");
     }
 
     if (rack_from_chain(&r, "hue=h=0,nosuchfilter=1", 640, 480, err, sizeof err) == 0) {
@@ -474,29 +471,44 @@ static int selftest(App *a)
     /* live path: push every knob through the command path, round-trip a preset */
     rack_send_all(&a->rack, a->voice);
     for (int i = 0; i < a->rack.ncontrols; i++) {
-        a->rack.sel = i;
-        rack_nudge(&a->rack, a->voice, +1, 1.0);
-        rack_nudge(&a->rack, a->voice, -1, 1.0);
+        a->rack.set.sel = i;
+        rack_nudge(&a->rack, a->voice, +1, PARAM_FINE);
+        rack_nudge(&a->rack, a->voice, -1, PARAM_FINE);
     }
-    a->rack.sel = 0;
-    int ms = rack_find_module(&a->rack, "shift"), ks = rack_find_knob(&a->rack, ms, "rh");
+    a->rack.set.sel = 0;
+    int ms = rack_find_module(&a->rack, "shift"), ks = rack_find_control(&a->rack, ms, "rh");
     int mn = rack_find_module(&a->rack, "noise");
-    if (ms < 0 || ks < 0 || mn < 0) { fprintf(stderr, "selftest: current chain is not the rack; skipping preset test\n"); }
+    int md = rack_find_module(&a->rack, "diff"), kd = rack_find_control(&a->rack, md, "all_mode");
+    if (ms < 0 || ks < 0 || mn < 0 || kd < 0) { fprintf(stderr, "selftest: current chain is not the rack; skipping preset test\n"); }
     else {
-        a->rack.values[ms][ks] = 7;
-        a->rack.enabled[mn] = 1;
+        rack_set_raw(&a->rack, ks, 7);
+        rack_set_enabled(&a->rack, a->voice, mn, 1);
+        /* the enum goes through the file as its constant, not its index */
+        a->rack.set.sel = kd;
+        rack_nudge(&a->rack, a->voice, +1, PARAM_FINE);
+        double kd_raw = rack_get_raw(&a->rack, kd), kd_idx = a->rack.values[kd];
         if (project_save_preset(a->proj, a->chain_id, 10, "selftest", &a->rack) < 0) { fprintf(stderr, "selftest: save FAILED\n"); fails++; }
         rack_reset_all(&a->rack, a->voice);
         int rc = project_load_preset(a->proj, a->chain_id, 10, &a->rack);
-        int ok = rc == 0 && a->rack.values[ms][ks] == 7 && a->rack.enabled[mn];
-        fprintf(stderr, "selftest: preset round-trip %s (rh=%g noise=%d)\n", ok ? "OK" : "FAILED",
-                a->rack.values[ms][ks], a->rack.enabled[mn]);
+        int ok = rc == 0 && a->rack.values[ks] == 7 && a->rack.enabled[mn] &&
+                 a->rack.values[kd] == kd_idx && rack_get_raw(&a->rack, kd) == kd_raw;
+        fprintf(stderr, "selftest: preset round-trip %s (rh=%g noise=%d all_mode=%g raw %g)\n", ok ? "OK" : "FAILED",
+                a->rack.values[ks], a->rack.enabled[mn], a->rack.values[kd], rack_get_raw(&a->rack, kd));
         if (!ok) fails++;
         rack_send_all(&a->rack, a->voice);
         rack_randomize(&a->rack, a->voice, 0.3);
         rack_set_control(&a->rack, a->voice, 0, 3);
-        ok = a->rack.values[a->rack.controls[0].module][a->rack.controls[0].knob] == 3;
+        ok = a->rack.values[0] == 3;
         fprintf(stderr, "selftest: set_control %s\n", ok ? "OK" : "FAILED");
+        if (!ok) fails++;
+        /* the three grains: fine moves one step, coarse ten, ultra a tenth (or one on an integer) */
+        a->rack.set.sel = ks;
+        rack_reset_selected(&a->rack, a->voice);
+        rack_nudge(&a->rack, a->voice, +1, PARAM_COARSE);
+        ok = a->rack.values[ks] == 10;
+        rack_nudge(&a->rack, a->voice, -1, PARAM_ULTRA);
+        ok = ok && a->rack.values[ks] == 9;
+        fprintf(stderr, "selftest: grains %s (rh=%g)\n", ok ? "OK" : "FAILED", a->rack.values[ks]);
         if (!ok) fails++;
     }
 
@@ -513,7 +525,7 @@ static int selftest(App *a)
     }
 
     a->cfg.cap_w = 640; a->cfg.cap_h = 480;
-    if (rack_from_chain(&r, a->rack.chain, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) == 0) a->rack = r;
+    if (rack_from_chain(&r, a->rack.chain, a->cfg.cap_w, a->cfg.cap_h, err, sizeof err) == 0) rack_adopt(&a->rack, &r);
     if (restart_voice(a) < 0) { fprintf(stderr, "selftest: restart FAILED\n"); fails++; }
     else fprintf(stderr, "selftest: voice restarted on %dx%d\n", a->cfg.cap_w, a->cfg.cap_h);
 
@@ -645,7 +657,7 @@ int main(int argc, char **argv)
         "vsynth: capture %d,%d %dx%d @%dfps, chain '%s'\n"
         "  mouse: left-drag move, right-drag resize; panel: click row, drag bar, wheel nudges\n"
         "  F1 help  F2 knobs  F3 chain editor (ctrl+enter applies)  F4 project  esc: picture\n"
-        "  pgup/pgdn switch chain; knobs: tab, arrows (shift fine, ctrl coarse), space bypass,\n"
+        "  pgup/pgdn switch chain; faders: tab, arrows (ctrl coarse, shift ultra), space bypass,\n"
         "  bksp reset, r reset all, x random (X wild), 1-0 load preset, shift+1-0 save\n"
         "  c pick capture region, f fullscreen, q quit\n",
         a.cfg.cap_x, a.cfg.cap_y, a.cfg.cap_w, a.cfg.cap_h, a.cfg.cap_fps, a.chain_name);
@@ -738,7 +750,7 @@ int main(int argc, char **argv)
 
             /* MAIN and PANEL share these keys */
             SDL_Keymod mod = SDL_GetModState();
-            double factor = (mod & SDL_KMOD_SHIFT) ? 0.1 : (mod & SDL_KMOD_CTRL) ? 10.0 : 1.0;
+            ParamGrain grain = ui_grain(mod);   /* fine; ctrl coarse; shift ultra-fine */
             SDL_Keycode key = ev.key.key;
             int slot = slot_for_scancode(ev.key.scancode);
             if (slot) { preset_key(&a, slot, (mod & SDL_KMOD_SHIFT) != 0); continue; }
@@ -767,12 +779,12 @@ int main(int argc, char **argv)
                 break;
             case SDLK_UP:
             case SDLK_RIGHT:
-                rack_nudge(&a.rack, a.voice, +1, factor);
+                rack_nudge(&a.rack, a.voice, +1, grain);
                 show_status(&a);
                 break;
             case SDLK_DOWN:
             case SDLK_LEFT:
-                rack_nudge(&a.rack, a.voice, -1, factor);
+                rack_nudge(&a.rack, a.voice, -1, grain);
                 show_status(&a);
                 break;
             case SDLK_SPACE:

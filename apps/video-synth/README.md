@@ -140,7 +140,7 @@ Picture and knobs share these keys:
 | Ctrl+`n` | new chain (a copy of the current one), opens the editor |
 | `c` | pick the capture region: desktop dims, current region shows in red; drag a new one, or Esc / right-click to keep it |
 | Tab / Shift+Tab | select next / previous control |
-| Up / Down (or Right / Left) | nudge selected knob; Shift = fine, Ctrl = coarse |
+| Up / Down (or Right / Left) | nudge the selected fader one fine step; Ctrl = coarse, Shift = ultra-fine |
 | Space | bypass / enable the selected module |
 | Backspace | reset selected knob to the value in the text |
 | `r` | reset the whole chain to the text values; the preset indicator clears |
@@ -151,12 +151,18 @@ Picture and knobs share these keys:
 | `f` | fullscreen toggle |
 | `q` | quit, saving geometry |
 
-Knobs mouse: click a row to select, drag its bar to set, click the module name
-to bypass, wheel to nudge (Shift fine, Ctrl coarse). Right-click over the rows
-still resizes the window. When a chain has more knobs than fit, the rows
+Every knob is a **fader**, the lab's shared control from `shared/param` and
+`shared/ui`, laid out one per row: module name, option, track, readout. The
+gestures are the lab's (ROADMAP section 6), the same as in Drone Commander:
+drag the track to set, wheel one fine step, Ctrl + wheel coarse, Shift + wheel
+ultra-fine, middle click or double click to reset to the value in the text.
+The faint tick on the track is that text value. A fader whose range crosses
+zero fills outward from it, so a shift left and a shift right read as what
+they are. Click the module name to bypass the module. Right-click over the
+rows still resizes the window. When a chain has more faders than fit, the rows
 scroll to follow the selection and the footer shows `n/total`. Enum options
 (blend modes, edge modes) show the constant's name and step through the
-constants.
+constants on click, wheel or arrow.
 
 Chain: arrows, Home/End, Ctrl+Home/End, Shift-selection, Ctrl+A/C/X/V, Tab
 inserts two spaces, Ctrl+Enter applies and leaves the cursor where it is,

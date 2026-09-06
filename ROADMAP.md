@@ -50,10 +50,11 @@ What every app has in common:
 - One toolchain, one set of root commands, one CI that builds and packages
   every app.
 
-## 3. Where things stand (2026-09-05, after P3)
+## 3. Where things stand (2026-09-06, after P4)
 
 Two apps, one toolchain, one C standard, one windowing API, and one control
-concept implemented once. About 6,400 lines, of which `shared/` is 616.
+concept implemented once and used twice. About 6,700 lines, of which `shared/`
+is 678.
 
 | | Drone Commander | vsynth |
 |---|---|---|
@@ -63,15 +64,14 @@ concept implemented once. About 6,400 lines, of which `shared/` is 616.
 | Other libraries | none | ffmpeg (avfilter, avformat, avcodec, avdevice, avutil), sqlite3 |
 | Parameters | `shared/param`, a static table of definitions | derived at runtime from the chain text (`rack.c`) |
 | Presets / persistence | none | SQLite project file: chains, ten presets each, geometry |
-| Controls | `shared/param` + `shared/ui` faders on a grid | its own knob rows, drawn by `hud.c` |
+| Controls | `shared/param` + `shared/ui` faders on a grid | `shared/param` + `shared/ui` faders, one per row, derived by `rack.c` |
 | Text | `SDL_RenderDebugText`, 8 px | a glyph atlas over a hunted system font |
 
 What is honestly not done yet, and why it blocks cranking out apps:
 
-1. **`shared/ui` has exactly one consumer.** Drone Commander uses it, vsynth
-   does not. A shared library with one consumer is extracted, not shared: there
-   is no evidence yet that the fader survives an app whose parameters are
-   derived at runtime rather than declared. P4 is the test of the abstraction.
+1. ~~**`shared/ui` has exactly one consumer.**~~ Resolved by P4: vsynth runs on
+   the fader with its parameters derived at runtime, in a row form the library
+   gained for it. Two consumers, two layouts, one gesture table.
 2. **There is no shell.** A third app would copy `main.c`'s SDL boot and frame
    loop, and copy `panel.c`'s event switch — which is the D8 gesture table
    transcribed by hand. Transcribed twice, it stops being one table. P5.
@@ -79,7 +79,8 @@ What is honestly not done yet, and why it blocks cranking out apps:
    decision. The font is lab-wide and belongs in the shell (D13, P5).
 4. **Both apps keep mutable file-scope state.** `panel.c` holds `VALUES[]`,
    `BOXES[]`, `FADERS[]` and `LAID_OUT`; `graph.c` holds `cap_on`; `rack.c`
-   holds `rng_state`. Small now, a week's work at ten apps (D12, P5).
+   held `rng_state` until P4 moved it into the `Rack`. Small now, a week's
+   work at ten apps (D12, P5).
 
 ## 4. Decisions
 
@@ -103,7 +104,7 @@ build trees. Executables land in `build/bin/`.
 goes there.** The libraries, in the order they are extracted:
 
 1. `shared/param`: the fader and parameter model (D8). Plain C, no SDL. *Done.*
-2. `shared/ui`: how a fader is drawn and driven, on SDL3. *Done, one consumer.*
+2. `shared/ui`: how a fader is drawn and driven, on SDL3. *Done, two consumers.*
 3. `shared/app`: the shell (D14). Window, frame loop, gesture dispatch, text,
    palette, and the app ABI the launcher later loads.
 4. `shared/bus`: named in-process signal buses (D11, D9). Lock-free rings.
@@ -461,13 +462,27 @@ A later pass made the hit-testing pixel-density independent.
   held one control apiece in a mostly empty box, and a 104 px track spanning
   20 Hz to 12 kHz put 115 Hz in a pixel with no reset and no fine grain.
 
-**P4. vsynth on the shared fader.** `rack.c` produces `Param`s instead of
-`KnobDef`s and `hud.c` draws them with `shared/ui`, so both apps' controls look
-and behave identically. This is the test of the abstraction: vsynth's
-parameters are discovered at runtime from the chain text, so if the fader model
-only fits a declared table, it fails here rather than in app number five.
-*Exit:* the two apps side by side are recognisably the same instrument family,
-and `--selftest` still passes.
+**P4. vsynth on the shared fader. Done 2026-09-06.** `rack.c` produces `Param`s
+and `hud.c` draws them with `shared/ui`, so both apps' controls look and behave
+identically. This was the test of the abstraction: vsynth's parameters are
+discovered at runtime from the chain text. What the test found:
+- The fader model held. Address, range, neutral, taper and the three grains
+  all had a natural source in the chain text: the written value is the
+  neutral, a range crossing zero is bipolar, an integer option has no grain
+  below one.
+- The *layout* needed a second form. A list of controls of unknown length
+  cannot use the three-line cell Drone Commander's panel uses, so `shared/ui`
+  gained `ui_fader_layout_row` and `ui_stepper_draw_row`: the same drawing
+  and the same gestures on one line. Two forms, one fader.
+- An enum's fader value is an index into its names; libavfilter wants the
+  constant. The rack converts at the command and at the preset file, so
+  project files written before the fader still load.
+- A struct holding a `ParamSet` holds pointers into itself, so it cannot be
+  copied by assignment. `rack_adopt()` relinks. This is an argument for D12
+  and P5: state an app owns on the heap, handed around by pointer, not by
+  value.
+- Also done here because the file was open: `rack.c`'s `rng_state` moved
+  into the `Rack` (D12), and vsynth's palette took the shared theme's values.
 
 **P5. `shared/app`: the shell, the identity, and owned state.** The phase that
 makes a new app cheap.
