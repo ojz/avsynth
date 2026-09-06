@@ -41,13 +41,19 @@ created on first run with three chains: `rack` (the classic fixed rack with
 eight presets), `mirror` and `kaleido`. Capture and window geometry are
 remembered in it; CLI flags override. `--vf` runs the given chain text instead
 of the project's current one. `--selftest` derives racks from the built-in
-chains, pushes every knob through the command path, round-trips a preset, and
-then keeps running.
+chains, rejects a deliberately broken one, checks the enum readout, pushes
+every knob through the command path, round-trips a preset and a chain rename
+and delete, then resets the capture region to 640x480 and keeps running.
+`--screenshot FILE.bmp` saves the window two seconds after start and keeps
+running; `--shots DIR` is where `F12` screenshots go.
 
-The panel text uses a system monospace font (Consolas on Windows, DejaVu Sans
-Mono or Liberation Mono on Linux); without one the panel still shows bars.
+The panel text uses a system monospace font: Consolas, Lucida Console or
+Courier New on Windows; DejaVu Sans Mono, Liberation Mono or Noto Sans Mono on
+Linux. Without one the panel still shows bars. One typeface shipped with the
+lab replaces this hunt in ROADMAP P5.
 
-The window is borderless. Put it inside the capture region for feedback.
+The window is borderless and opens in knobs mode. Put it inside the capture
+region for feedback.
 
 ## Vocabulary
 
@@ -113,7 +119,9 @@ Esc returns to the picture; so does the F-key of the mode you are in. Help is
 a detour: Esc there returns to wherever you opened it from. `q` quits from
 picture and knobs; in the text modes it is a letter. The mouse always belongs
 to the window: left-drag moves, right-drag resizes, in every mode, even over
-the editor or help. Taps are visible in every mode that shows the picture.
+the editor or help. Taps are visible on the picture and in knobs and chain
+mode; help and project hide them. If the running chain fails, the app switches
+to the chain editor by itself with libavfilter's error in red.
 
 Keys that work in every mode:
 
@@ -135,8 +143,8 @@ Picture and knobs share these keys:
 | Up / Down (or Right / Left) | nudge selected knob; Shift = fine, Ctrl = coarse |
 | Space | bypass / enable the selected module |
 | Backspace | reset selected knob to the value in the text |
-| `r` | reset the whole chain to the text values |
-| `x` | randomize: knobs wander a little from neutral, some modules switch on |
+| `r` | reset the whole chain to the text values; the preset indicator clears |
+| `x` | randomize: knobs wander a little from neutral, some modules switch on; the preset indicator clears |
 | Shift + `x` | randomize wildly (full ranges) |
 | `1`–`9`, `0` | load preset slot 1–10 (physical digit row, so it works on AZERTY) |
 | Shift + `1`–`9`, `0` | save current knobs to that slot |
@@ -144,8 +152,11 @@ Picture and knobs share these keys:
 | `q` | quit, saving geometry |
 
 Knobs mouse: click a row to select, drag its bar to set, click the module name
-to bypass, wheel to nudge (Shift fine, Ctrl coarse). Enum options (blend
-modes, edge modes) show the constant's name and step through the constants.
+to bypass, wheel to nudge (Shift fine, Ctrl coarse). Right-click over the rows
+still resizes the window. When a chain has more knobs than fit, the rows
+scroll to follow the selection and the footer shows `n/total`. Enum options
+(blend modes, edge modes) show the constant's name and step through the
+constants.
 
 Chain: arrows, Home/End, Ctrl+Home/End, Shift-selection, Ctrl+A/C/X/V, Tab
 inserts two spaces, Ctrl+Enter applies and leaves the cursor where it is,
@@ -166,14 +177,17 @@ chain, Enter switches to it, `n` adds a new chain (copy of the current one),
 `r` renames it (type, Enter), Delete pressed twice deletes it. The last chain
 cannot be deleted.
 
-The window title and stderr show the selected knob and its value.
+The window title shows the chain name, the last preset slot and the selected
+knob with its value; stderr prints the key map once at start and the selected
+knob as it changes.
 
 ## Starter chains
 
 - `rack`: the original fixed rack written out as text, with presets
   1 init, 2 spin, 3 tunnel, 4 trail, 5 invert, 6 edge, 7 chroma, 8 melt.
 - `mirror`: `crop,split,hflip,hstack` with hue and rotate knobs.
-- `kaleido`: four-way mirror with a `half` tap showing the two-way stage.
+- `kaleido`: four-way mirror with a `half` tap showing the two-way stage, plus
+  a trail (`lagfun`) and contrast and saturation knobs (`eq`).
 
 ## Testing
 

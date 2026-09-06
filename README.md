@@ -13,19 +13,21 @@ the plan.
 
 | Application | What it is | Docs |
 |---|---|---|
-| **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with FM cascade, state-variable filter, VCA and three synced square LFOs. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
+| **Drone Commander** (`apps/drone-commander`) | Three-oscillator audio drone synth with pulse width, FM cascade, state-variable filter, VCA and three square LFOs, the second and third able to hard-sync to the one before. The digital sketch for a fully analog hardware build. | [README](apps/drone-commander/README.md) |
 | **vsynth** (`apps/video-synth`) | Video feedback synth. Captures a screen region, runs it through a libavfilter chain you write as text, shows the result in a borderless window you drag into the capture region. Controls are derived from the text; presets live in a SQLite project file. | [README](apps/video-synth/README.md), [PRD](apps/video-synth/PRD.md) |
 
 Both are C17 on SDL3, built by one CMake project against system libraries from
 pkg-config. Nothing is vendored or downloaded at configure time, so both
 machines and CI resolve the same libraries from the same packages.
 
-Every continuous control in every app is a **fader**: it resets to a neutral,
-shows its value at full precision with its unit, and moves at three grains so a
-value can actually be dialled in. It carries a stable address, so a preset, a
-MIDI CC or a sequencer step can drive it without the app knowing which. That is
-the lab's shared control language, specified in [ROADMAP.md](ROADMAP.md)
-section 6 and implemented once in `shared/param` and `shared/ui`.
+Every continuous control in the lab is meant to be a **fader**: it resets to a
+neutral, shows its value at full precision with its unit, and moves at three
+grains so a value can actually be dialled in. It carries a stable address, so a
+preset, a MIDI CC or a sequencer step can drive it without the app knowing
+which. That is the lab's shared control language, specified in
+[ROADMAP.md](ROADMAP.md) section 6 and implemented once in `shared/param` and
+`shared/ui`. Drone Commander runs on it today. vsynth still draws its own knob
+rows and moves onto the fader in phase P4, which is the work in progress.
 
 ## Where this is going
 
@@ -45,14 +47,19 @@ one shared app shell and one typeface (P5), then the launcher and the buses
 
 ```text
 apps/drone-commander/   audio drone synth
-apps/video-synth/       video feedback synth
+apps/video-synth/       video feedback synth; PRD.md there is its design
+shared/                 code used by more than one app; its README lists the libraries
 shared/param/           the fader and parameter model, plain C, tested offline
-shared/ui/              the control surface on SDL3: how a fader looks and behaves
-launcher/               hosts the apps (planned, P6)
+shared/ui/              the control surface on SDL3: how a fader looks and behaves, one palette
+shared/app/             the app shell: SDL boot, frame loop, gesture dispatch (planned, P5)
+shared/bus/             named in-process signal buses, audio and control rate (planned, P6)
+launcher/               hosts the apps in one process (planned, P6)
 tools/package.sh        release packaging: exe plus the DLLs it links
 assets/fonts/           the lab's typeface (planned, P5)
-assets/screenshots/     screenshots per application
+assets/screenshots/     screenshots; Drone Commander so far
 .github/workflows/      CI: build, test, artifacts, tagged releases
+CMakeLists.txt          the one CMake project; CMakePresets.json for editors
+Makefile                the root commands, puts the toolchain on PATH itself
 ROADMAP.md              vision, decisions, phases
 AGENTS.md               rules for agents and contributors
 ```
